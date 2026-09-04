@@ -44,7 +44,7 @@ export async function runOverdueScan(now = new Date()): Promise<{ scanned: numbe
     }
 
     const url = familyUrl(trip.groupReadToken);
-    const sent = await pushGroup('alert', alertMessages(trip, { overdueH: d.overdueH, morning: d.kind === 'morning', final: d.final }, url, now));
+    const sent = await pushGroup(trip.ownerUid, 'alert', alertMessages(trip, { overdueH: d.overdueH, morning: d.kind === 'morning', final: d.final }, url, now));
     const patch: Partial<Trip> = { updatedAt: Timestamp.fromDate(now) };
     if (d.patch.alerted !== undefined) patch.alerted = d.patch.alerted;
     if (d.patch.alertCount !== undefined) patch.alertCount = d.patch.alertCount;

@@ -19,11 +19,11 @@ const secrets = Object.fromEntries(
     .filter((l) => l.includes('='))
     .map((l) => l.split('=', 2)),
 );
-const TOKEN = secrets.WRITE_TOKEN;
 const PROJECT = 'demo-iamalive';
 const REGION = 'asia-east1';
 const FN_HOST = process.env.FUNCTIONS_EMULATOR_HOST ?? '127.0.0.1:5001';
 const BASE = `http://${FN_HOST}/${PROJECT}/${REGION}/api/api`;
+const WH = `http://${FN_HOST}/${PROJECT}/${REGION}/lineWebhook`;
 
 process.env.GCLOUD_PROJECT = PROJECT;
 initializeApp({ projectId: PROJECT });
@@ -32,10 +32,20 @@ const db = getFirestore();
 let step = 0;
 const log = (m) => console.log(`[e2e ${String(++step).padStart(2, '0')}] ${m}`);
 
-async function call(method, path, body, token = TOKEN) {
+/** 目前預設身分：{ apiKey } | { cookie } | { legacy } | null */
+let AUTH = null;
+function authHeaders(auth = AUTH) {
+  if (!auth) return {};
+  if (auth.apiKey) return { 'x-api-key': auth.apiKey };
+  if (auth.cookie) return { cookie: auth.cookie, origin: `http://${FN_HOST}` };
+  if (auth.legacy) return { 'x-write-token': auth.legacy };
+  return {};
+}
+
+async function call(method, path, body, auth = AUTH) {
   const res = await fetch(`${BASE}${path}`, {
     method,
-    headers: { 'content-type': 'application/json', ...(token ? { 'x-write-token': token } : {}) },
+    headers: { 'content-type': 'application/json', ...authHeaders(auth) },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   let json = null;
@@ -44,8 +54,29 @@ async function call(method, path, body, token = TOKEN) {
   } catch {
     /* ignore */
   }
-  return { status: res.status, json };
+  return { status: res.status, json, headers: res.headers };
 }
+
+async function devLogin(uid, name) {
+  const r = await call('POST', '/auth/dev-login', { uid, name }, null);
+  assert.equal(r.status, 200, JSON.stringify(r.json));
+  const sc = r.headers.get('set-cookie') ?? '';
+  const m = sc.match(/__session=([^;]+)/);
+  assert.ok(m, 'session cookie set');
+  return { cookie: `__session=${m[1]}` };
+}
+
+/** 送一則已簽章的 webhook 事件。 */
+async function webhookEvent(event) {
+  const { createHmac } = await import('node:crypto');
+  const body = JSON.stringify({ destination: 'x', events: [event] });
+  const sig = createHmac('sha256', secrets.LINE_CHANNEL_SECRET).update(body).digest('base64');
+  const r = await fetch(WH, { method: 'POST', headers: { 'content-type': 'application/json', 'x-line-signature': sig }, body });
+  assert.equal(r.status, 200);
+}
+const groupSrc = (groupId, userId) => ({ type: 'group', groupId, userId });
+const textEvent = (groupId, userId, text) => ({ type: 'message', replyToken: 'r', timestamp: Date.now(), source: groupSrc(groupId, userId), message: { id: '1', type: 'text', text } });
+const locationEvent = (groupId, userId, lat, lng, title) => ({ type: 'message', replyToken: 'r', timestamp: Date.now(), source: groupSrc(groupId, userId), message: { id: '2', type: 'location', title, address: '', latitude: lat, longitude: lng } });
 
 async function waitForFunctions() {
   for (let i = 0; i < 60; i++) {
@@ -66,14 +97,45 @@ async function main() {
   await waitForFunctions();
   log('functions emulator ready');
 
-  // 認證
-  let r = await call('GET', '/status', undefined, 'wrong');
-  assert.equal(r.status, 401, 'wrong token must be 401');
-  r = await call('GET', '/status');
+  // ---- 認證：未登入 401 → dev-login → 金鑰 → 舊 token 對應 ----
+  const A_UID = secrets.TRAVELER_LINE_UID; // 舊 WRITE_TOKEN 對應到這位
+  const B_UID = 'Ub2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2';
+  let r = await call('GET', '/status', undefined, null);
+  assert.equal(r.status, 401, 'no auth must be 401');
+  r = await call('GET', '/status', undefined, { apiKey: 'ak_nope' });
+  assert.equal(r.status, 401, 'bad key must be 401');
+
+  const sessA = await devLogin(A_UID, '旅人 A');
+  r = await call('GET', '/status', undefined, sessA);
   assert.equal(r.status, 200);
+  assert.equal(r.json.user.uid, A_UID);
+  assert.equal(r.json.user.kind, 'session');
   assert.equal(r.json.groupBound, false);
   assert.equal(r.json.activeTrip, null);
-  log('auth + status ok');
+  log('login + status ok');
+
+  // CSRF：cookie 身分的 POST 若 sec-fetch-site=cross-site 要 403
+  {
+    const res = await fetch(`${BASE}/trips`, { method: 'POST', headers: { 'content-type': 'application/json', cookie: sessA.cookie, 'sec-fetch-site': 'cross-site' }, body: '{}' });
+    assert.equal(res.status, 403, 'cross-site cookie POST rejected');
+  }
+
+  r = await call('POST', '/keys', { label: 'iPhone' }, sessA);
+  assert.equal(r.status, 201, JSON.stringify(r.json));
+  assert.ok(r.json.key.startsWith('ak_'));
+  const KEY = r.json.key;
+  AUTH = { apiKey: KEY };
+  r = await call('GET', '/keys', undefined, sessA);
+  assert.equal(r.json.length, 1);
+  assert.equal(r.json[0].label, 'iPhone');
+  r = await call('GET', '/status');
+  assert.equal(r.json.user.kind, 'apikey');
+  assert.equal(r.json.user.uid, A_UID);
+  r = await call('GET', '/status', undefined, { legacy: secrets.WRITE_TOKEN });
+  assert.equal(r.status, 200);
+  assert.equal(r.json.user.uid, A_UID, 'legacy write token maps to traveler uid');
+  assert.equal(r.json.user.kind, 'legacy');
+  log('api key + legacy token ok');
 
   // 建立行程
   const now = new Date();
@@ -145,7 +207,7 @@ async function main() {
     fd.append('note', '少女峰');
     fd.append('takenAt', new Date(Date.now() - 2 * H).toISOString());
     fd.append('photo', new Blob([jpeg], { type: 'image/jpeg' }), 'p.jpg');
-    const res0 = await fetch(`${BASE}/checkin/photo`, { method: 'POST', headers: { 'x-write-token': TOKEN }, body: fd });
+    const res0 = await fetch(`${BASE}/checkin/photo`, { method: 'POST', headers: authHeaders(), body: fd });
     const j0 = await res0.json();
     assert.equal(res0.status, 200, JSON.stringify(j0));
     assert.equal(j0.tz, 'Europe/Zurich');
@@ -165,12 +227,12 @@ async function main() {
     const fd2 = new FormData();
     fd2.append('lat', '1');
     fd2.append('lng', '1');
-    assert.equal((await fetch(`${BASE}/checkin/photo`, { method: 'POST', headers: { 'x-write-token': TOKEN }, body: fd2 })).status, 400);
+    assert.equal((await fetch(`${BASE}/checkin/photo`, { method: 'POST', headers: authHeaders(), body: fd2 })).status, 400);
     const fd3 = new FormData();
     fd3.append('lat', '1');
     fd3.append('lng', '1');
     fd3.append('photo', new Blob(['hi'], { type: 'text/plain' }), 'x.txt');
-    assert.equal((await fetch(`${BASE}/checkin/photo`, { method: 'POST', headers: { 'x-write-token': TOKEN }, body: fd3 })).status, 415);
+    assert.equal((await fetch(`${BASE}/checkin/photo`, { method: 'POST', headers: authHeaders(), body: fd3 })).status, 415);
     log('photo checkin + photo serving ok');
 
     // 刪除該筆打卡：紀錄消失、照片 404、view 更新、最後回報退回前一筆、期限不變
@@ -218,6 +280,54 @@ async function main() {
   r = await call('DELETE', `/trips/${trip.id}/watchers/${trip.groupReadToken}`);
   assert.equal(r.status, 400, 'group token cannot be removed');
   log('watcher add/list/remove ok');
+
+  // ---- 使用者隔離 ----
+  const sessB = await devLogin(B_UID, '旅人 B');
+  r = await call('GET', '/trips/active', undefined, sessB);
+  assert.equal(r.status, 404, 'B has no active trip');
+  r = await call('GET', `/trips/${trip.id}/watchers`, undefined, sessB);
+  assert.equal(r.status, 404, "B cannot see A's trip");
+  r = await call('POST', '/checkin', { lat: 1, lng: 1 }, sessB);
+  assert.equal(r.status, 409, 'B has no trip to check in');
+  r = await call('GET', '/trips', undefined, sessB);
+  assert.deepEqual(r.json, []);
+  log('per-user isolation ok');
+
+  // ---- 群組綁定碼 + webhook 路由 ----
+  const G = 'C' + 'a'.repeat(32);
+  await webhookEvent(textEvent(G, A_UID, '綁定 000000'));
+  assert.equal((await db.doc(`groups/${G}`).get()).exists, false, 'invalid code does not bind');
+  r = await call('POST', '/line/bind-code', undefined, sessA);
+  assert.equal(r.status, 200);
+  const code = r.json.code;
+  assert.match(code, /^\d{6}$/);
+  await webhookEvent(textEvent(G, B_UID, `綁定 ${code}`));
+  assert.equal((await db.doc(`groups/${G}`).get()).exists, false, "someone else cannot use A's code");
+  await webhookEvent(textEvent(G, A_UID, `綁定 ${code}`));
+  const gdoc = (await db.doc(`groups/${G}`).get()).data();
+  assert.equal(gdoc?.ownerUid, A_UID, 'group bound to A');
+  assert.equal((await db.doc(`bindCodes/${code}`).get()).exists, false, 'code consumed');
+  r = await call('GET', '/status', undefined, sessA);
+  assert.equal(r.json.groupBound, true);
+  // 擁有者在群組傳位置 → 打卡；別人傳 → 忽略
+  const beforeN = ((await db.doc(`views/${trip.groupReadToken}`).get()).data()).recent.length;
+  await webhookEvent(locationEvent(G, B_UID, 48.85, 2.35, '巴黎'));
+  assert.equal(((await db.doc(`views/${trip.groupReadToken}`).get()).data()).recent.length, beforeN, 'non-owner location ignored');
+  await webhookEvent(locationEvent(G, A_UID, 48.8584, 2.2945, '艾菲爾鐵塔'));
+  view = (await db.doc(`views/${trip.groupReadToken}`).get()).data();
+  assert.equal(view.recent.length, beforeN + 1);
+  assert.equal(view.recent[0].src, 'line');
+  assert.equal(view.recent[0].tz, 'Europe/Paris');
+  // 重綁另一個群組會解除舊群組
+  r = await call('POST', '/line/bind-code', undefined, sessA);
+  const G2 = 'C' + 'b'.repeat(32);
+  await webhookEvent(textEvent(G2, A_UID, `綁定 ${r.json.code}`));
+  assert.equal((await db.doc(`groups/${G}`).get()).exists, false, 'old group unbound');
+  assert.equal((await db.doc(`groups/${G2}`).get()).data()?.ownerUid, A_UID);
+  // leave 事件解除綁定
+  await webhookEvent({ type: 'leave', timestamp: Date.now(), source: { type: 'group', groupId: G2 } });
+  assert.equal((await db.doc(`groups/${G2}`).get()).exists, false, 'leave removes binding');
+  log('bind code + webhook routing ok');
 
   // ---- 逾時狀態機（直接呼叫編譯後的 runOverdueScan，Firestore 指向 emulator） ----
   for (const [k, v] of Object.entries(secrets)) process.env[k] = v;
@@ -346,15 +456,25 @@ async function main() {
   assert.equal(r.status, 409);
   log('no active trip after completion');
 
+  // 撤銷金鑰 → 401
+  r = await call('GET', '/keys', undefined, sessA);
+  r = await call('DELETE', `/keys/${r.json[0].id}`, undefined, sessA);
+  assert.equal(r.status, 200);
+  r = await call('GET', '/status');
+  assert.equal(r.status, 401, 'revoked key rejected');
+  AUTH = sessA;
+  r = await call('POST', '/auth/logout', undefined, sessA);
+  assert.match(r.headers.get('set-cookie') ?? '', /Max-Age=0/);
+  log('key revoke + logout ok');
+
   // webhook 簽章：錯誤簽章 401
-  const wh = `http://${FN_HOST}/${PROJECT}/${REGION}/lineWebhook`;
-  const bad = await fetch(wh, { method: 'POST', headers: { 'content-type': 'application/json', 'x-line-signature': 'nope' }, body: '{"events":[]}' });
+  const bad = await fetch(WH, { method: 'POST', headers: { 'content-type': 'application/json', 'x-line-signature': 'nope' }, body: '{"events":[]}' });
   assert.equal(bad.status, 401);
   // 正確簽章 200（用 .secret.local 的 channel secret 算 HMAC）
   const { createHmac } = await import('node:crypto');
   const body = JSON.stringify({ destination: 'x', events: [] });
   const sig = createHmac('sha256', secrets.LINE_CHANNEL_SECRET).update(body).digest('base64');
-  const good = await fetch(wh, { method: 'POST', headers: { 'content-type': 'application/json', 'x-line-signature': sig }, body });
+  const good = await fetch(WH, { method: 'POST', headers: { 'content-type': 'application/json', 'x-line-signature': sig }, body });
   assert.equal(good.status, 200);
   log('webhook signature check ok');
 

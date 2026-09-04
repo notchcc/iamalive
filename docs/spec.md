@@ -2,7 +2,7 @@
 
 | 項目 | 內容 |
 |---|---|
-| 文件版本 | v0.6 |
+| 文件版本 | v0.7 |
 | 日期 | 2026-09-04 |
 | 狀態 | 設計定稿，待決事項已全部定案，可進入開發 |
 
@@ -16,6 +16,7 @@
 | v0.4 | 待決事項定案：警報參數與安靜時段補發（台北時間）、打卡靜默只推狀態變化、位置訊息附家人頁連結、保留家人頁；新增旅人時區與台北雙時鐘 |
 | v0.5 | 新增**航段**（多筆，當地時間輸入），飛行中不警報、期限順延至降落後 3 小時；打卡紀錄加入**反向地理編碼城市**與經緯度；行程開始前不警報；webhook 未綁定時自動綁定首個群組 |
 | v0.6 | 新增**照片打卡**：捷徑 D（分享表單）與 `/me` 上傳，以照片 EXIF 的 GPS 與拍攝時間為打卡資訊；照片存私有 GCS bucket，家人頁經 token 驗證取圖並顯示縮圖 |
+| v0.7 | **多使用者**：`/me` 改用 **LINE Login**（session cookie），捷徑改用可撤銷的 **API 金鑰**；行程、群組綁定、金鑰皆以 LINE userId 為範圍；群組以**綁定碼**綁定；不做邀請名單（任何 LINE 帳號可登入） |
 
 ---
 
@@ -104,34 +105,36 @@
 
 | 角色 | 憑證 | 用途 | 儲存位置 |
 |---|---|---|---|
-| 旅行者（HTTP） | `WRITE_TOKEN`（Secret） | 建立/結束行程、打卡、預告離線、管理家人 | iOS 捷徑、`/me` 頁 localStorage |
-| 旅行者（LINE） | `TRAVELER_LINE_UID`（Secret） | webhook 只接受此 userId 的位置訊息與指令 | Secret |
-| 家人（網頁） | `readToken`（Firestore 文件 ID） | 讀取 `views/{readToken}` | 連結網址 |
-| 家人（LINE） | 群組成員身分 | 收推播、在群組下指令 | 無需任何設定 |
-| 官方帳號 | `LINE_CHANNEL_SECRET`、`LINE_CHANNEL_ACCESS_TOKEN` | 驗證 webhook、呼叫 push/reply | Secret |
+| 旅行者（網頁） | LINE Login → session JWT（HS256，30 天）放在 `__session` cookie | `/me` 全部操作 | HttpOnly cookie（Hosting 只轉送此名稱的 cookie） |
+| 旅行者（捷徑） | API 金鑰 `ak_…`（`X-Api-Key`），每人最多 10 把、可個別撤銷 | 打卡、預告離線 | 捷徑；伺服器只存 SHA-256 雜湊 `apiKeys/{hash}` |
+| 旅行者（LINE 群組） | 群組綁定 `groups/{groupId}.ownerUid` | 位置訊息打卡、`離線 / 結束 / 備註` 指令 | 由「綁定 123456」建立 |
+| 家人（網頁） | `readToken`（Firestore 文件 ID） | 讀取 `views/{readToken}` 與照片 | 連結網址 |
+| 家人（LINE） | 群組成員身分 | 收推播、「在哪」「行程」 | 無需任何設定 |
+| 官方帳號 | `LINE_CHANNEL_SECRET`、`LINE_CHANNEL_ACCESS_TOKEN` | 驗證 webhook、push/reply | Secret |
+| LINE Login | `LINE_LOGIN_CHANNEL_ID`（env）、`LINE_LOGIN_CHANNEL_SECRET`、`SESSION_SECRET` | 授權碼交換、驗 ID token、簽 session | Secret |
+| 過渡 | `WRITE_TOKEN` + `TRAVELER_LINE_UID` | 舊 `X-Write-Token` 視為該使用者的金鑰 | 捷徑全部換金鑰後移除 |
 
-- token 皆為 ≥ 128 bit 隨機值，base64url 編碼。
-- 寫入 token 比對使用 `crypto.timingSafeEqual`。
-- 讀取 token 可個別撤銷：刪除 `views/{readToken}` 即失效。
-- `TRAVELER_LINE_UID` 於首次在群組傳訊息時從 webhook log 取得後寫入 Secret。
+登入流程：`GET /api/auth/line/start`（簽章 `state`，10 分鐘）→ LINE 授權 → `GET /api/auth/line/callback` 以 channel secret 換 token、呼叫 LINE verify 端點驗 ID token 與 `aud` → upsert `users/{userId}` → 設 cookie → 導回 `/me`。cookie 身分的變更請求需同站（`Sec-Fetch-Site` / `Origin` 檢查）。**LINE Login channel 與 Messaging API channel 必須在同一個 Provider**，userId 才一致。
 
 ---
 
 ## 4. 資料模型（Firestore）
 
-### 4.1 `config/line`（僅 Functions 讀寫）
+### 4.1 使用者、群組、金鑰
 
-| 欄位 | 型別 | 說明 |
-|---|---|---|
-| `groupId` | string \| null | 官方帳號所在的家人群組 ID，由 `join` 事件寫入，`leave` 事件清空 |
-| `joinedAt` | timestamp \| null | |
-| `monthKey` | string | 額度計數月份 `YYYY-MM`（台北時間） |
-| `pushCount` | number | 本月已 push 則數（reply 不計） |
+| 集合 | 說明 |
+|---|---|
+| `users/{lineUserId}` | `displayName`、`pictureUrl`、`createdAt`、`lastLoginAt` |
+| `groups/{lineGroupId}` | `ownerUid`、`boundAt`。一人一個群組；重綁會解除舊的；`leave` 事件刪除 |
+| `bindCodes/{6位數}` | `uid`、`expiresAt`（10 分鐘）。`/me` 產生，群組內由本人輸入「綁定 123456」消耗 |
+| `apiKeys/{sha256(key)}` | `uid`、`label`、`prefix`、`createdAt`、`lastUsedAt`（每小時最多更新一次） |
+| `config/line` | 全域推播額度：`monthKey`、`pushCount`（所有使用者共用） |
 
 ### 4.2 `trips/{tripId}`（僅 Functions 讀寫）
 
 | 欄位 | 型別 | 說明 |
 |---|---|---|
+| `ownerUid` | string | 擁有者 LINE userId；所有 API 以此為範圍，非擁有者一律 404 |
 | `title` | string | 行程名稱 |
 | `startAt` / `endAt` | timestamp | 行程起訖 |
 | `intervalHours` | number | 預設打卡間隔（1–72） |
@@ -199,7 +202,7 @@
 
 ### 4.5 索引
 
-- `trips`：複合 `status ASC, nextDeadlineAt ASC`
+- `trips`：複合 `status ASC, nextDeadlineAt ASC`（排程）、`ownerUid ASC, status ASC`（進行中行程）、`ownerUid ASC, createdAt DESC`（列表）
 - `checkins`：單欄 `createdAt DESC`（自動）
 
 ### 4.6 安全規則
@@ -225,7 +228,18 @@ service cloud.firestore {
 
 ### 5.1 Function `api`（Hosting rewrite `/api/**`）
 
-寫入端點需 header `X-Write-Token`。錯誤一律 `{ error: string }`。
+公開端點：`/health`、`/p/*`、`/auth/line/*`、`/auth/logout`。其餘需 `__session` cookie 或 `X-Api-Key`。錯誤一律 `{ error: string }`。
+
+| Method | Path | 用途 |
+|---|---|---|
+| GET | `/api/auth/line/start` | 導向 LINE 授權 |
+| GET | `/api/auth/line/callback` | 授權回呼，設 cookie 後導回 `/me` |
+| POST | `/api/auth/logout` | 清 cookie |
+| GET | `/api/auth/me` | 目前身分（uid、kind、名稱、頭像） |
+| GET / POST / DELETE | `/api/keys[/:id]` | 列出 / 產生（明文只回一次）/ 撤銷金鑰 |
+| POST | `/api/line/bind-code` | 產生 6 位數綁定碼（10 分鐘） |
+| POST | `/api/line/unbind` | 解除自己的群組綁定 |
+
 
 | Method | Path | 用途 | 主要邏輯 |
 |---|---|---|---|
@@ -236,7 +250,6 @@ service cloud.firestore {
 | POST | `/api/checkin/photo` | 照片打卡 | `multipart/form-data`：`photo`（檔案，≤ 8 MB，jpeg/png/heic/webp）+ `lat`、`lng`、`accuracy?`、`note?`、`nextHours?`、`takenAt?`、`clientAt?`；存入 GCS 後走與 `/checkin` 相同流程，`source = photo` |
 | GET | `/api/p/:readToken/:photoId` | 家人頁取圖 | **不需寫入 token**；驗證 `views/{readToken}` 存在且照片屬於該行程後串流回傳，`Cache-Control: private, max-age=86400` |
 | PUT | `/api/trips/:id/flights` | 整批更新航段 | `{ flights: [{ flightNo, fromCity, fromTz, departLocal, toCity, toTz, arriveLocal }] }`，`*Local` 為 `YYYY-MM-DDTHH:mm` 當地時間；驗證時區有效、降落晚於起飛、單段 ≤ 30 小時 |
-| POST | `/api/line/bind` | 手動綁定群組 | `{ groupId }` |
 | POST | `/api/trips/:id/watchers` | 新增家人頁連結 | 產生 readToken，建立 `views/{token}`，回傳連結 |
 | DELETE | `/api/trips/:id/watchers/:token` | 撤銷連結 | 刪 view |
 | GET | `/api/trips/active` | 取目前 active 行程 | 捷徑與 `/me` 用 |
@@ -259,8 +272,9 @@ Response: { ok: true, nextDeadlineAt, tz, pushed: boolean }
 
 - 驗證 `x-line-signature`（HMAC-SHA256，Channel Secret），失敗回 401。
 - 一律先回 200，再非同步處理事件。
-- 只處理 `source.type == 'group'` 且 `groupId` 與 `config/line` 相符的事件（`join` 除外）。
-- **尚未綁定任何群組時，第一個送來事件的群組即自動綁定**（涵蓋邀請 bot 時 webhook 尚未開啟、`join` 事件遺失的情況），並把來訊者 userId 寫入 log 供設定 `TRAVELER_LINE_UID`。
+- 只服務群組事件。`join`：回覆綁定說明；`leave`：刪除 `groups/{gid}`。
+- 「綁定 123456」：任何群組都處理；碼須有效且由產生者本人輸入；成功後該人先前綁的其他群組解除。
+- 其餘事件：`groups/{gid}` → `ownerUid` → 該人的進行中行程。位置訊息與 `離線 / 結束 / 備註` 只接受擁有者；「在哪」「行程」任何成員可用。未綁定群組只在有人輸入指令時回覆提示，其餘靜默。
 
 | 事件 | 處理 |
 |---|---|
@@ -350,6 +364,9 @@ reply 免費，不計額度。非旅行者傳的位置訊息忽略。
 - 「地圖選點打卡」：定位失敗時的手動路徑，`source = manual`。
 - 建立 / 結束行程、預告離線、新增 / 撤銷家人連結、顯示群組綁定狀態與本月額度。
 - **用照片打卡**卡片：`<input type=file accept=image/*>`（iPhone 顯示拍照 / 圖庫），瀏覽器端以 `exifr` 讀 GPS、拍攝時間、`GPSHPositioningError`，無 GPS 時可改用目前定位；`createImageBitmap` 縮圖至 1600px 後 multipart 上傳。iOS Safari 選圖是否保留 GPS EXIF 因版本而異，需實機確認。
+- **登入**：未登入只顯示「用 LINE 登入」；已登入右上顯示名稱與頭像、登出。
+- **家人 LINE 群組**卡片：未綁定時顯示三步驟（邀請官方帳號、產生綁定碼、本人在群組輸入）；已綁定可解除。
+- **捷徑金鑰**卡片：列表（標籤、前 8 碼、建立與最後使用時間）、產生（只顯示一次、複製）、撤銷。
 - **航段**卡片：列表與刪除；新增表單含航班號碼、起飛城市 / 時區 / 當地時間、降落城市 / 時區 / 當地時間；時區欄為 datalist（常用城市中文對照），選時區自動帶入城市名，新增後下一段的起飛欄自動帶入上一段目的地。
 - 內嵌與家人頁相同的地圖與時間軸元件（自用回顧）。
 
@@ -649,3 +666,4 @@ firebase functions:secrets:set TRAVELER_LINE_UID
 | 6 | 航段 | 多筆、當地時間輸入；飛行中不警報，期限順延至降落後 3 小時 |
 | 7 | 地點顯示 | 打卡時反向地理編碼存城市；卡片顯示城市 + 經緯度 + 地圖連結 |
 | 8 | 照片打卡 | 手動觸發（捷徑分享表單 / 網頁上傳），不自動；群組訊息不附照片 |
+| 9 | 多使用者 | `/me` 用 LINE Login，捷徑用 API 金鑰；不做邀請名單、不做每人額度；責任與成本由擁有者承擔 |

@@ -1,8 +1,8 @@
 # iOS 捷徑：打卡入口
 
-三支捷徑，全部只用內建動作，不需額外 App。`<HOST>` 換成你的 Hosting 網址（如 `https://xxx.web.app`），`<TOKEN>` 換成 `WRITE_TOKEN`。
+四支捷徑，全部只用內建動作，不需額外 App。`<HOST>` 換成你的 Hosting 網址（如 `https://xxx.web.app`），`<KEY>` 換成在 `/me` 用 LINE 登入後產生的**捷徑金鑰**（`ak_` 開頭，只顯示一次）。
 
-> 安全提醒：token 明文存在捷徑內。**不要用 iCloud 連結分享這些捷徑。** 外流時到 Firebase 換 Secret 並重新部署即可。
+> 安全提醒：金鑰明文存在捷徑內。**不要用 iCloud 連結分享這些捷徑。** 外流時到 `/me` 撤銷該把金鑰、再產生一把新的即可，不需重新部署。
 
 ---
 
@@ -11,7 +11,7 @@
 | # | 動作 | 設定 |
 |---|---|---|
 | 1 | 取得目前位置 | 精確度：最佳 |
-| 2 | 取得 URL 內容 | URL：`<HOST>/api/checkin`<br>方法：POST<br>標頭：`X-Write-Token` = `<TOKEN>`<br>請求本文：JSON |
+| 2 | 取得 URL 內容 | URL：`<HOST>/api/checkin`<br>方法：POST<br>標頭：`X-Api-Key` = `<KEY>`<br>請求本文：JSON |
 |   | └ JSON 欄位 | `lat`（數字）= 位置 › 緯度<br>`lng`（數字）= 位置 › 經度<br>`source`（文字）= `shortcut`<br>`clientAt`（文字）= 目前日期，格式 ISO 8601 |
 | 3 | 從輸入取得字典值 | 取得 `nextDeadlineAt` 的值，輸入：URL 內容 |
 | 4 | 格式化日期 | 日期：字典值；格式：自訂 `MM/dd HH:mm`；時區：Asia/Taipei |
@@ -42,7 +42,7 @@
 
 | # | 動作 | 設定 |
 |---|---|---|
-| 1 | 取得 URL 內容 | URL：`<HOST>/api/trips/active`；方法：GET；標頭：`X-Write-Token` = `<TOKEN>` |
+| 1 | 取得 URL 內容 | URL：`<HOST>/api/trips/active`；方法：GET；標頭：`X-Api-Key` = `<KEY>` |
 | 2 | 從輸入取得字典值 | 取得 `id` → 變數 `tripId` |
 | 3 | 從選單選擇 | 「離線多久」：8 / 12 / 16 / 24 / 自訂 → 變數 `hours` |
 | 4 | 取得 URL 內容 | URL：`<HOST>/api/trips/{tripId}/offline`；方法：POST；標頭同上；JSON：`hours`（數字） |
@@ -82,7 +82,7 @@
 | 5 | 調整影像大小 | `照片`，寬度 1600、高度自動 |
 | 6 | 轉換影像 | 轉成 JPEG，品質 中，**不保留詮釋資料**（位置另外傳） |
 | 7 | 要求輸入 | 「備註（可空）」→ 變數 `備註`（不想每次輸入可刪掉這步） |
-| 8 | 取得 URL 內容 | URL：`<HOST>/api/checkin/photo`<br>方法：POST<br>標頭：`X-Write-Token` = `<TOKEN>`<br>請求本文：**表單**<br>`lat`（文字）= 位置 › 緯度<br>`lng`（文字）= 位置 › 經度<br>`takenAt`（文字）= 拍攝時間<br>`note`（文字）= 備註<br>`clientAt`（文字）= 目前日期（ISO 8601）<br>`photo`（檔案）= 轉換後的影像 |
+| 8 | 取得 URL 內容 | URL：`<HOST>/api/checkin/photo`<br>方法：POST<br>標頭：`X-Api-Key` = `<KEY>`<br>請求本文：**表單**<br>`lat`（文字）= 位置 › 緯度<br>`lng`（文字）= 位置 › 經度<br>`takenAt`（文字）= 拍攝時間<br>`note`（文字）= 備註<br>`clientAt`（文字）= 目前日期（ISO 8601）<br>`photo`（檔案）= 轉換後的影像 |
 | 9 | 從輸入取得字典值 | `nextDeadlineAt` |
 | 10 | 顯示通知 | 「已用照片打卡 📷 下次期限（台北）：{格式化日期}」 |
 

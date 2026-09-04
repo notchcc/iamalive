@@ -1,13 +1,31 @@
 /**
- * HTTP API（Hosting rewrite `/api/**` → 此 Function）。寫入端點需 `X-Write-Token`。
+ * HTTP API（Hosting rewrite `/api/**` → 此 Function）。
+ * 公開：/health、/p/*（家人頁取圖）、/auth/line/*。其餘需 session cookie 或 X-Api-Key。
  */
-import { timingSafeEqual } from 'node:crypto';
+import { randomInt } from 'node:crypto';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { logger } from 'firebase-functions/v2';
 import { z } from 'zod';
-import { WRITE_TOKEN, familyUrl } from './config.js';
-import { Timestamp, getLineConfig, lineConfigRef, tripsCol } from './db.js';
+import { familyUrl } from './config.js';
+import { Timestamp, bindCodesCol, getLineConfig, groupIdForOwner, groupsCol, tripsCol, usersCol } from './db.js';
 import { MONTHLY_QUOTA } from './line.js';
+import {
+  SESSION_DAYS,
+  createApiKey,
+  isEmulator,
+  lineAuthorizeUrl,
+  lineExchangeCode,
+  listApiKeys,
+  makeState,
+  requireAuth,
+  revokeApiKey,
+  sessionCookie,
+  signSession,
+  uidOf,
+  upsertUser,
+  verifyState,
+  type AuthInfo,
+} from './auth.js';
 import {
   HttpError,
   addWatcher,
@@ -28,24 +46,6 @@ import type { FlightSegment } from './types.js';
 import { parseMultipart } from './multipart.js';
 import { MAX_PHOTO_BYTES, isAllowedImage, readPhoto, savePhoto } from './photos.js';
 import { viewsCol } from './db.js';
-
-function safeEqual(a: string, b: string): boolean {
-  const ab = Buffer.from(a);
-  const bb = Buffer.from(b);
-  if (ab.length !== bb.length || ab.length === 0) return false;
-  return timingSafeEqual(ab, bb);
-}
-
-function requireWriteToken(req: Request, _res: Response, next: NextFunction): void {
-  const header = req.header('x-write-token') ?? '';
-  const bearer = (req.header('authorization') ?? '').replace(/^Bearer\s+/i, '');
-  const provided = header || bearer;
-  if (!safeEqual(provided, WRITE_TOKEN.value())) {
-    next(new HttpError(401, 'UNAUTHORIZED'));
-    return;
-  }
-  next();
-}
 
 const isoDate = z
   .string()
@@ -195,17 +195,82 @@ export function createApp(): express.Express {
     }),
   );
 
-  r.use(requireWriteToken);
+  // ---------- LINE Login ----------
+  r.get(
+    '/auth/line/start',
+    wrap(async (_req, res) => {
+      res.setHeader('Cache-Control', 'no-store');
+      res.redirect(302, lineAuthorizeUrl(makeState()));
+    }),
+  );
+
+  r.get(
+    '/auth/line/callback',
+    wrap(async (req, res) => {
+      res.setHeader('Cache-Control', 'no-store');
+      const { code, state, error } = req.query as Record<string, string | undefined>;
+      if (error) {
+        res.redirect(302, `/me?login=denied`);
+        return;
+      }
+      if (!code || !state || !verifyState(state)) {
+        res.redirect(302, `/me?login=invalid`);
+        return;
+      }
+      const profile = await lineExchangeCode(code);
+      await upsertUser(profile);
+      res.setHeader('Set-Cookie', sessionCookie(signSession(profile.userId, profile.displayName), SESSION_DAYS * 86400));
+      res.redirect(302, '/me');
+    }),
+  );
+
+  r.post(
+    '/auth/logout',
+    wrap(async (_req, res) => {
+      res.setHeader('Set-Cookie', sessionCookie('', 0));
+      res.json({ ok: true });
+    }),
+  );
+
+  /** 只在 emulator 註冊：測試用登入。 */
+  if (isEmulator()) {
+    r.post(
+      '/auth/dev-login',
+      wrap(async (req, res) => {
+        const { uid, name } = z.object({ uid: z.string().min(3), name: z.string().default('測試者') }).parse(req.body);
+        await upsertUser({ userId: uid, displayName: name, pictureUrl: null });
+        res.setHeader('Set-Cookie', sessionCookie(signSession(uid, name), SESSION_DAYS * 86400));
+        res.json({ ok: true, uid });
+      }),
+    );
+  }
+
+  r.use(requireAuth);
+
+  r.get(
+    '/auth/me',
+    wrap(async (_req, res) => {
+      const auth = res.locals.auth as AuthInfo;
+      const u = (await usersCol.doc(auth.uid).get()).data();
+      res.json({ uid: auth.uid, kind: auth.kind, displayName: u?.displayName ?? null, pictureUrl: u?.pictureUrl ?? null });
+    }),
+  );
 
   r.get(
     '/status',
     wrap(async (_req, res) => {
-      const cfg = await getLineConfig();
-      const active = await getActiveTrip();
+      const uid = uidOf(res);
+      const [cfg, groupId, active, user] = await Promise.all([
+        getLineConfig(),
+        groupIdForOwner(uid),
+        getActiveTrip(uid),
+        usersCol.doc(uid).get(),
+      ]);
       const key = monthKey(new Date());
+      const auth = res.locals.auth as AuthInfo;
       res.json({
-        groupBound: Boolean(cfg.groupId),
-        joinedAt: cfg.joinedAt ? cfg.joinedAt.toDate().toISOString() : null,
+        user: { uid, kind: auth.kind, displayName: user.data()?.displayName ?? null, pictureUrl: user.data()?.pictureUrl ?? null },
+        groupBound: Boolean(groupId),
         monthKey: key,
         pushCount: cfg.monthKey === key ? cfg.pushCount : 0,
         monthlyQuota: MONTHLY_QUOTA,
@@ -214,10 +279,75 @@ export function createApp(): express.Express {
     }),
   );
 
+  // ---------- API 金鑰 ----------
+  r.get(
+    '/keys',
+    wrap(async (_req, res) => {
+      const keys = await listApiKeys(uidOf(res));
+      res.json(
+        keys.map((k) => ({
+          id: k.id,
+          label: k.label,
+          prefix: k.prefix,
+          createdAt: k.createdAt.toDate().toISOString(),
+          lastUsedAt: k.lastUsedAt ? k.lastUsedAt.toDate().toISOString() : null,
+        })),
+      );
+    }),
+  );
+
+  r.post(
+    '/keys',
+    wrap(async (req, res) => {
+      const { label } = z.object({ label: z.string().trim().min(1).max(30) }).parse(req.body);
+      const uid = uidOf(res);
+      if ((await listApiKeys(uid)).length >= 10) throw new HttpError(409, 'TOO_MANY_KEYS');
+      const { key, id } = await createApiKey(uid, label);
+      res.status(201).json({ id, key, label });
+    }),
+  );
+
+  r.delete(
+    '/keys/:id',
+    wrap(async (req, res) => {
+      await revokeApiKey(uidOf(res), String(req.params.id));
+      res.json({ ok: true });
+    }),
+  );
+
+  // ---------- 群組綁定 ----------
+  r.post(
+    '/line/bind-code',
+    wrap(async (_req, res) => {
+      const uid = uidOf(res);
+      // 清掉這個人先前未用的碼
+      const old = await bindCodesCol.where('uid', '==', uid).get();
+      await Promise.all(old.docs.map((d) => d.ref.delete()));
+      let code = '';
+      for (let i = 0; i < 5; i++) {
+        code = String(randomInt(0, 1_000_000)).padStart(6, '0');
+        if (!(await bindCodesCol.doc(code).get()).exists) break;
+      }
+      const expiresAt = Timestamp.fromMillis(Date.now() + 10 * 60_000);
+      await bindCodesCol.doc(code).set({ uid, expiresAt });
+      res.json({ code, expiresAt: expiresAt.toDate().toISOString() });
+    }),
+  );
+
+  r.post(
+    '/line/unbind',
+    wrap(async (_req, res) => {
+      const uid = uidOf(res);
+      const q = await groupsCol.where('ownerUid', '==', uid).get();
+      await Promise.all(q.docs.map((d) => d.ref.delete()));
+      res.json({ ok: true });
+    }),
+  );
+
   r.get(
     '/trips/active',
     wrap(async (_req, res) => {
-      const active = await getActiveTrip();
+      const active = await getActiveTrip(uidOf(res));
       if (!active) {
         res.status(404).json({ error: 'NO_ACTIVE_TRIP' });
         return;
@@ -229,7 +359,7 @@ export function createApp(): express.Express {
   r.get(
     '/trips',
     wrap(async (_req, res) => {
-      const q = await tripsCol.orderBy('createdAt', 'desc').limit(20).get();
+      const q = await tripsCol.where('ownerUid', '==', uidOf(res)).orderBy('createdAt', 'desc').limit(20).get();
       res.json(q.docs.map((d) => tripJson(d.id, d.data())));
     }),
   );
@@ -238,7 +368,7 @@ export function createApp(): express.Express {
     '/trips',
     wrap(async (req, res) => {
       const input = CreateTripSchema.parse(req.body);
-      const { id, trip, url } = await createTrip(input);
+      const { id, trip, url } = await createTrip(uidOf(res), input);
       res.status(201).json({ ...tripJson(id, trip), familyUrl: url });
     }),
   );
@@ -247,7 +377,7 @@ export function createApp(): express.Express {
     '/checkin',
     wrap(async (req, res) => {
       const input = CheckinSchema.parse(req.body);
-      const trip = await requireActiveTrip();
+      const trip = await requireActiveTrip(uidOf(res));
       const result = await recordCheckin(trip, {
         lat: input.lat,
         lng: input.lng,
@@ -280,7 +410,7 @@ export function createApp(): express.Express {
       if (!parsed.file || parsed.file.data.length === 0) throw new HttpError(400, 'PHOTO_REQUIRED');
       if (!isAllowedImage(parsed.file.mimeType)) throw new HttpError(415, 'UNSUPPORTED_IMAGE_TYPE');
       const f = PhotoFieldsSchema.parse(parsed.fields);
-      const trip = await requireActiveTrip();
+      const trip = await requireActiveTrip(uidOf(res));
       const photoId = await savePhoto(trip.id, parsed.file.data, parsed.file.mimeType);
       const result = await recordCheckin(trip, {
         lat: f.lat,
@@ -308,7 +438,7 @@ export function createApp(): express.Express {
     '/trips/:id/offline',
     wrap(async (req, res) => {
       const { hours } = OfflineSchema.parse(req.body);
-      const trip = await requireTrip(req.params.id);
+      const trip = await requireTrip(uidOf(res), req.params.id);
       const out = await setOffline(trip, hours);
       res.json({
         ok: true,
@@ -323,7 +453,7 @@ export function createApp(): express.Express {
     '/trips/:id/flights',
     wrap(async (req, res) => {
       const { flights } = FlightsSchema.parse(req.body);
-      const trip = await requireTrip(req.params.id);
+      const trip = await requireTrip(uidOf(res), req.params.id);
       const saved = await setFlights(
         trip,
         flights.map((f) => ({ ...f, departAt: Timestamp.fromDate(f.departAt), arriveAt: Timestamp.fromDate(f.arriveAt) })),
@@ -335,7 +465,7 @@ export function createApp(): express.Express {
   r.post(
     '/trips/:id/end',
     wrap(async (req, res) => {
-      const trip = await requireTrip(req.params.id);
+      const trip = await requireTrip(uidOf(res), req.params.id);
       const out = await endTrip(trip, '旅行者已手動結案');
       res.json({ ok: true, pushed: out.pushed });
     }),
@@ -344,7 +474,7 @@ export function createApp(): express.Express {
   r.delete(
     '/trips/:id/checkins/:checkinId',
     wrap(async (req, res) => {
-      const trip = await requireTrip(req.params.id, false);
+      const trip = await requireTrip(uidOf(res), req.params.id, false);
       await deleteCheckin(trip, String(req.params.checkinId));
       res.json({ ok: true });
     }),
@@ -353,7 +483,7 @@ export function createApp(): express.Express {
   r.post(
     '/trips/:id/resync',
     wrap(async (req, res) => {
-      const trip = await requireTrip(req.params.id, false);
+      const trip = await requireTrip(uidOf(res), req.params.id, false);
       await resyncTrip(trip);
       res.json({ ok: true });
     }),
@@ -362,7 +492,7 @@ export function createApp(): express.Express {
   r.get(
     '/trips/:id/watchers',
     wrap(async (req, res) => {
-      const trip = await requireTrip(req.params.id, false);
+      const trip = await requireTrip(uidOf(res), req.params.id, false);
       res.json(await listWatchers(trip.data()));
     }),
   );
@@ -371,7 +501,7 @@ export function createApp(): express.Express {
     '/trips/:id/watchers',
     wrap(async (req, res) => {
       const { label } = WatcherSchema.parse(req.body);
-      const trip = await requireTrip(req.params.id, false);
+      const trip = await requireTrip(uidOf(res), req.params.id, false);
       res.status(201).json(await addWatcher(trip, label));
     }),
   );
@@ -379,27 +509,8 @@ export function createApp(): express.Express {
   r.delete(
     '/trips/:id/watchers/:token',
     wrap(async (req, res) => {
-      const trip = await requireTrip(req.params.id, false);
+      const trip = await requireTrip(uidOf(res), req.params.id, false);
       await removeWatcher(trip, req.params.token);
-      res.json({ ok: true });
-    }),
-  );
-
-  /** 手動綁定群組（從 log 取得 groupId 時用）。 */
-  r.post(
-    '/line/bind',
-    wrap(async (req, res) => {
-      const { groupId } = z.object({ groupId: z.string().regex(/^C[0-9a-f]{32}$/) }).parse(req.body);
-      await lineConfigRef.set({ groupId, joinedAt: Timestamp.now() }, { merge: true });
-      res.json({ ok: true });
-    }),
-  );
-
-  /** 解除群組綁定（bot 被拉錯群組時用），之後重新邀請即可重綁。 */
-  r.post(
-    '/line/unbind',
-    wrap(async (_req, res) => {
-      await lineConfigRef.set({ groupId: null, joinedAt: null }, { merge: true });
       res.json({ ok: true });
     }),
   );
@@ -426,9 +537,10 @@ export function createApp(): express.Express {
   return app;
 }
 
-async function requireTrip(id: string, mustBeActive = true) {
+async function requireTrip(uid: string, id: string, mustBeActive = true) {
   const snap = await tripsCol.doc(id).get();
-  if (!snap.exists) throw new HttpError(404, 'TRIP_NOT_FOUND');
+  // 不是自己的行程一律 404，避免列舉
+  if (!snap.exists || snap.data()?.ownerUid !== uid) throw new HttpError(404, 'TRIP_NOT_FOUND');
   if (mustBeActive && snap.data()?.status !== 'active') throw new HttpError(409, 'TRIP_NOT_ACTIVE');
   return snap as FirebaseFirestore.QueryDocumentSnapshot<import('./types.js').Trip>;
 }

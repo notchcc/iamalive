@@ -3,7 +3,7 @@ import { onRequest } from 'firebase-functions/v2/https';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { logger } from 'firebase-functions/v2';
 import { createApp } from './api.js';
-import { ALL_SECRETS, LINE_SECRETS, REGION, WRITE_TOKEN } from './config.js';
+import { ALL_SECRETS, LINE_SECRETS, REGION } from './config.js';
 import { runOverdueScan } from './overdue.js';
 import { TAIPEI } from './time.js';
 import { handleLineWebhook } from './webhook.js';
@@ -13,7 +13,7 @@ setGlobalOptions({ region: REGION, maxInstances: 3, timeoutSeconds: 60, memory: 
 const app = createApp();
 
 /** `/api/**`（經 Hosting rewrite）。 */
-export const api = onRequest({ secrets: [WRITE_TOKEN, ...LINE_SECRETS] }, app);
+export const api = onRequest({ secrets: ALL_SECRETS }, app);
 
 /** LINE webhook。直接使用 Functions URL，不經 Hosting rewrite，以保留 rawBody 驗簽。 */
 export const lineWebhook = onRequest({ secrets: LINE_SECRETS }, (req, res) => {

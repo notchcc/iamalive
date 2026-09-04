@@ -1,23 +1,4 @@
-import type { FlightInput, FlightJson, StatusJson, TripJson, WatcherJson } from './types';
-
-const TOKEN_KEY = 'iamalive.writeToken';
-
-export function getToken(): string {
-  try {
-    return localStorage.getItem(TOKEN_KEY) ?? '';
-  } catch {
-    return '';
-  }
-}
-
-export function setToken(t: string): void {
-  try {
-    if (t) localStorage.setItem(TOKEN_KEY, t);
-    else localStorage.removeItem(TOKEN_KEY);
-  } catch {
-    /* ignore */
-  }
-}
+import type { FlightInput, FlightJson, KeyJson, StatusJson, TripJson, UserJson, WatcherJson } from './types';
 
 export class ApiError extends Error {
   constructor(
@@ -31,10 +12,8 @@ export class ApiError extends Error {
 async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(`/api${path}`, {
     method,
-    headers: {
-      'content-type': 'application/json',
-      'x-write-token': getToken(),
-    },
+    credentials: 'same-origin',
+    headers: { 'content-type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   if (!res.ok) {
@@ -50,6 +29,12 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
 }
 
 export const api = {
+  me: () => call<UserJson>('GET', '/auth/me'),
+  logout: () => call<{ ok: true }>('POST', '/auth/logout'),
+  keys: () => call<KeyJson[]>('GET', '/keys'),
+  createKey: (label: string) => call<{ id: string; key: string; label: string }>('POST', '/keys', { label }),
+  revokeKey: (id: string) => call<{ ok: true }>('DELETE', `/keys/${id}`),
+  bindCode: () => call<{ code: string; expiresAt: string }>('POST', '/line/bind-code'),
   status: () => call<StatusJson>('GET', '/status'),
   trips: () => call<TripJson[]>('GET', '/trips'),
   createTrip: (input: { title: string; startAt: string; endAt: string; intervalHours: number }) =>
@@ -65,7 +50,7 @@ export const api = {
   }) => call<{ ok: true; nextDeadlineAt: string; tz: string; pushed: boolean; recovered: boolean }>('POST', '/checkin', input),
   /** 照片打卡：multipart，欄位由呼叫端組好（photo、lat、lng、note、nextHours、takenAt、clientAt）。 */
   checkinPhoto: async (form: FormData) => {
-    const res = await fetch('/api/checkin/photo', { method: 'POST', headers: { 'x-write-token': getToken() }, body: form });
+    const res = await fetch('/api/checkin/photo', { method: 'POST', credentials: 'same-origin', body: form });
     if (!res.ok) {
       let code = res.statusText;
       try {

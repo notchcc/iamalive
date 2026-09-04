@@ -18,7 +18,17 @@ docs/        規格書
 3. 新增 Web App，取得 SDK 設定。
 4. 把 `.firebaserc` 的 `YOUR_FIREBASE_PROJECT_ID` 換成專案 ID。
 
-### 2. LINE 官方帳號
+### 2. LINE 官方帳號與 LINE Login
+
+同一個 **Provider** 底下要有兩個 channel：Messaging API（推播、webhook）與 LINE Login（`/me` 登入）。**必須同一個 Provider**，兩邊拿到的 userId 才一致。
+
+#### 2a. LINE Login channel（`/me` 登入）
+
+1. LINE Developers → 同一個 Provider → 新增 **LINE Login** channel，App types 勾 Web app。
+2. Callback URL 填 `https://<host>/api/auth/line/callback`。
+3. 記下 **Channel ID**（填 `functions/.env` 的 `LINE_LOGIN_CHANNEL_ID`）與 **Channel secret**（Secret `LINE_LOGIN_CHANNEL_SECRET`）。
+
+#### 2b. Messaging API channel（官方帳號）
 
 1. [LINE Developers](https://developers.line.biz/)：建立 Provider → **Messaging API channel**。
 2. LINE Official Account Manager → 設定 → 回應設定：關閉自動回應與加入好友歡迎訊息；**開啟「允許加入群組・多人聊天室」**。
@@ -28,15 +38,15 @@ docs/        規格書
 ### 3. Secrets 與環境變數
 
 ```bash
-# 寫入 token（自己產生一個 ≥ 22 字元的隨機字串）
-openssl rand -base64 24 | tr '+/' '-_' | tr -d '='
-
+firebase functions:secrets:set LINE_CHANNEL_SECRET          # Messaging API
+firebase functions:secrets:set LINE_CHANNEL_ACCESS_TOKEN    # Messaging API 長效 token
+firebase functions:secrets:set LINE_LOGIN_CHANNEL_SECRET    # LINE Login
+openssl rand -base64 48 | firebase functions:secrets:set SESSION_SECRET --data-file -   # session 簽章金鑰
+# 過渡期（可略）：舊捷徑仍用 X-Write-Token 時，設 WRITE_TOKEN 與 TRAVELER_LINE_UID（對應的使用者）
 firebase functions:secrets:set WRITE_TOKEN
-firebase functions:secrets:set LINE_CHANNEL_SECRET
-firebase functions:secrets:set LINE_CHANNEL_ACCESS_TOKEN
-firebase functions:secrets:set TRAVELER_LINE_UID     # 先隨便填，步驟 5 再更新
+firebase functions:secrets:set TRAVELER_LINE_UID
 
-cp functions/.env.example functions/.env             # 填 PUBLIC_BASE_URL、PHOTO_BUCKET
+cp functions/.env.example functions/.env             # 填 PUBLIC_BASE_URL、PHOTO_BUCKET、LINE_LOGIN_CHANNEL_ID
 cp web/.env.example web/.env                         # 填 Firebase Web 設定與 MapTiler key
 ```
 
@@ -59,16 +69,13 @@ firebase deploy --only firestore,functions,hosting
 
 （不部署 `storage` 規則：照片 bucket 不是 Firebase 預設 bucket，規則檔只給 emulator 用。）部署輸出會列出 `lineWebhook` 的 URL，填回 LINE Developers 的 Webhook URL。
 
-### 5. 綁定群組與旅行者身分
+### 5. 登入、綁定群組、產生金鑰
 
-1. 把官方帳號邀請進家人群組。bot 會回「已加入」，`config/line.groupId` 已寫入。
-2. 自己在群組傳任一則訊息，到 Cloud Logging 找 `message from userId (set TRAVELER_LINE_UID)`，把 `userId` 寫入 Secret 並重新部署 functions：
+1. 開 `https://<host>/me` → 「用 LINE 登入」（iPhone 會跳 LINE App 授權）。
+2. 把官方帳號邀請進家人群組，回到 `/me` 按「產生綁定碼」，由你本人在群組輸入「綁定 123456」。bot 回「✅ 綁定完成」。
+3. `/me` → 捷徑金鑰 → 產生一把，複製到捷徑的 `X-Api-Key`（只顯示一次；可隨時撤銷重發）。
 
-   ```bash
-   firebase functions:secrets:set TRAVELER_LINE_UID
-   firebase deploy --only functions
-   ```
-3. 開 `https://<host>/me`，輸入 `WRITE_TOKEN`，確認「LINE 群組：已綁定」。
+每位用 LINE 登入的人都有自己的行程、群組綁定與金鑰；推播額度（免費 200 則/月）為整個官方帳號共用。
 
 ### 6. 捷徑
 
@@ -76,7 +83,7 @@ firebase deploy --only firestore,functions,hosting
 
 ## 日常使用
 
-1. `/me` 建立行程（群組收到「行程開始」與家人頁連結）。
+1. `/me` 用 LINE 登入後建立行程（群組收到「行程開始」與家人頁連結）。
 2. 出門後按捷徑 A 打卡。打卡不推群組；家人看家人頁，或在群組輸入「在哪」「行程」。
 3. 長途飛行前按捷徑 C 或在群組輸入 `離線 16`。
 4. 逾時未打卡：群組收到警報，每 3 小時重複、最多 4 次；台北 23:00–07:00 發出的警報會在 08:00 補發一次。

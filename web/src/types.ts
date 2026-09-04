@@ -84,9 +84,24 @@ export interface TripJson {
   flights: FlightJson[];
 }
 
+export interface UserJson {
+  uid: string;
+  kind: 'session' | 'apikey' | 'legacy';
+  displayName: string | null;
+  pictureUrl: string | null;
+}
+
+export interface KeyJson {
+  id: string;
+  label: string;
+  prefix: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+}
+
 export interface StatusJson {
+  user: UserJson;
   groupBound: boolean;
-  joinedAt: string | null;
   monthKey: string;
   pushCount: number;
   monthlyQuota: number;

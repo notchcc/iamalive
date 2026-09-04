@@ -12,16 +12,10 @@ import { endMessages, offlineMessages, pushGroup, recoveryMessages, startMessage
 import { HOUR_MS, TAIPEI, isValidTz } from './time.js';
 import type { Checkin, CheckinSource, FlightSegment, RecentItem, Trip, View } from './types.js';
 
-export const RECENT_LIMIT = 100;
+import { HttpError } from './errors.js';
+export { HttpError };
 
-export class HttpError extends Error {
-  constructor(
-    public status: number,
-    message: string,
-  ) {
-    super(message);
-  }
-}
+export const RECENT_LIMIT = 100;
 
 export function newToken(): string {
   return randomBytes(16).toString('base64url');
@@ -36,13 +30,13 @@ export function tzFor(lat: number, lng: number): string {
   }
 }
 
-export async function getActiveTrip(): Promise<TripSnap | null> {
-  const q = await tripsCol.where('status', '==', 'active').limit(1).get();
+export async function getActiveTrip(ownerUid: string): Promise<TripSnap | null> {
+  const q = await tripsCol.where('ownerUid', '==', ownerUid).where('status', '==', 'active').limit(1).get();
   return q.empty ? null : q.docs[0];
 }
 
-export async function requireActiveTrip(): Promise<TripSnap> {
-  const t = await getActiveTrip();
+export async function requireActiveTrip(ownerUid: string): Promise<TripSnap> {
+  const t = await getActiveTrip(ownerUid);
   if (!t) throw new HttpError(409, 'NO_ACTIVE_TRIP');
   return t;
 }
@@ -112,12 +106,13 @@ export interface CreateTripInput {
   intervalHours: number;
 }
 
-export async function createTrip(input: CreateTripInput): Promise<{ id: string; trip: Trip; url: string }> {
-  if (await getActiveTrip()) throw new HttpError(409, 'ACTIVE_TRIP_EXISTS');
+export async function createTrip(ownerUid: string, input: CreateTripInput): Promise<{ id: string; trip: Trip; url: string }> {
+  if (await getActiveTrip(ownerUid)) throw new HttpError(409, 'ACTIVE_TRIP_EXISTS');
   const now = new Date();
   const base = input.startAt > now ? input.startAt : now;
   const groupReadToken = newToken();
   const trip: Trip = {
+    ownerUid,
     title: input.title,
     startAt: Timestamp.fromDate(input.startAt),
     endAt: Timestamp.fromDate(input.endAt),
@@ -146,7 +141,7 @@ export async function createTrip(input: CreateTripInput): Promise<{ id: string; 
   batch.set(viewsCol.doc(groupReadToken), buildView(ref.id, trip, '群組', []));
   await batch.commit();
   const url = familyUrl(groupReadToken);
-  await pushGroup('start', startMessages(trip, url));
+  await pushGroup(ownerUid, 'start', startMessages(trip, url));
   return { id: ref.id, trip, url };
 }
 
@@ -222,6 +217,7 @@ export async function recordCheckin(snap: TripSnap, input: CheckinInput): Promis
   const recovered = trip.alerted;
   if (recovered) {
     pushed = await pushGroup(
+      trip.ownerUid,
       'recovery',
       recoveryMessages(updated, input.lat, input.lng, now, tz, place, input.note, familyUrl(trip.groupReadToken)),
     );
@@ -248,7 +244,7 @@ export async function setOffline(snap: TripSnap, hours: number): Promise<{ offli
   batch.update(snap.ref, patch);
   await syncViews(snap.id, updated, { batch });
   await batch.commit();
-  const pushed = await pushGroup('offline', offlineMessages(updated, offlineUntil, familyUrl(trip.groupReadToken)));
+  const pushed = await pushGroup(trip.ownerUid, 'offline', offlineMessages(updated, offlineUntil, familyUrl(trip.groupReadToken)));
   return { offlineUntil, nextDeadlineAt, pushed };
 }
 
@@ -260,7 +256,7 @@ export async function endTrip(snap: TripSnap, reason: string): Promise<{ pushed:
   batch.update(snap.ref, patch);
   await syncViews(snap.id, updated, { batch });
   await batch.commit();
-  const pushed = await pushGroup('end', endMessages(updated, reason, familyUrl(trip.groupReadToken)));
+  const pushed = await pushGroup(trip.ownerUid, 'end', endMessages(updated, reason, familyUrl(trip.groupReadToken)));
   return { pushed };
 }
 

@@ -1,24 +1,23 @@
 /**
- * LINE webhook：綁定群組、位置訊息打卡、旅行者文字指令、家人免費查詢（reply）。
+ * LINE webhook（多群組版）：
+ * - 群組以「綁定 123456」綁到一位擁有者（綁定碼由 /me 產生）。
+ * - 其餘事件依 groupId → ownerUid → 該人的進行中行程 路由。
+ * - 位置訊息打卡與旅行者指令只接受擁有者本人；「在哪」「行程」任何成員可用（reply 免費）。
  *
  * 注意：2nd gen Functions 在回應後 CPU 會被節流，所以事件處理完才回 200。
- * LINE 不會因回應稍慢而重送（預設未開啟 redelivery），事件仍會被處理。
  */
 import type { webhook } from '@line/bot-sdk';
 import { logger } from 'firebase-functions/v2';
 import type { Request, Response } from 'express';
-import { TRAVELER_LINE_UID, familyUrl } from './config.js';
-import { Timestamp, getLineConfig, lineConfigRef } from './db.js';
+import { familyUrl } from './config.js';
+import { Timestamp, bindCodesCol, db, groupsCol } from './db.js';
 import { recentListMessages, reply, textMsg, verifyLineSignature, whereMessages } from './line.js';
 import { fmtBoth } from './time.js';
-import { HttpError, endTrip, getActiveTrip, recentForTrip, recordCheckin, setOffline, updateLastNote } from './trips.js';
+import { endTrip, getActiveTrip, recentForTrip, recordCheckin, setOffline, updateLastNote } from './trips.js';
 
 type Event = webhook.Event;
 
-function isTraveler(userId: string | undefined): boolean {
-  const uid = TRAVELER_LINE_UID.value();
-  return Boolean(uid) && userId === uid;
-}
+const HELP_UNBOUND = '此群組尚未綁定。請到管理頁取得 6 位數綁定碼，然後在這裡輸入「綁定 123456」。';
 
 function groupIdOf(ev: Event): string | null {
   const src = ev.source as webhook.Source | undefined;
@@ -49,59 +48,88 @@ export async function handleLineWebhook(req: Request, res: Response): Promise<vo
   res.status(200).send('ok');
 }
 
+/** 以綁定碼把群組綁到擁有者；同一人先前綁的其他群組會解除。 */
+export async function bindGroupWithCode(gid: string, code: string, userId: string | undefined): Promise<'ok' | 'invalid' | 'not_owner'> {
+  const ref = bindCodesCol.doc(code);
+  const snap = await ref.get();
+  const bc = snap.data();
+  if (!bc || bc.expiresAt.toMillis() < Date.now()) return 'invalid';
+  if (!userId || bc.uid !== userId) return 'not_owner';
+  const others = await groupsCol.where('ownerUid', '==', bc.uid).get();
+  const batch = db.batch();
+  for (const d of others.docs) if (d.id !== gid) batch.delete(d.ref);
+  batch.set(groupsCol.doc(gid), { ownerUid: bc.uid, boundAt: Timestamp.now() });
+  batch.delete(ref);
+  await batch.commit();
+  return 'ok';
+}
+
 async function handleEvent(ev: Event): Promise<void> {
-  const cfg = await getLineConfig();
   const gid = groupIdOf(ev);
+  if (!gid) return; // 只服務群組
 
   if (ev.type === 'join') {
-    if (!gid) return;
-    if (cfg.groupId && cfg.groupId !== gid) {
-      logger.warn('join ignored: already bound to another group', { gid });
-      return;
-    }
-    await lineConfigRef.set({ groupId: gid, joinedAt: Timestamp.now() }, { merge: true });
     const rt = (ev as webhook.JoinEvent).replyToken;
-    if (rt) await reply(rt, [textMsg('已加入。之後行程起訖、離線預告與逾時提醒都會在這裡通知。\n輸入「在哪」查最後位置，「行程」看最近回報。')]);
+    const bound = await groupsCol.doc(gid).get();
+    if (rt) {
+      await reply(rt, [
+        textMsg(
+          bound.exists
+            ? '已回到群組。行程起訖、離線預告與逾時提醒會在這裡通知。'
+            : `已加入。${HELP_UNBOUND}\n綁定後：行程起訖、離線預告與逾時提醒會在這裡通知；輸入「在哪」查最後位置，「行程」看最近回報。`,
+        ),
+      ]);
+    }
     return;
   }
 
   if (ev.type === 'leave') {
-    if (gid && cfg.groupId === gid) {
-      await lineConfigRef.set({ groupId: null, joinedAt: null }, { merge: true });
-      logger.warn('bot left the bound group');
-    }
+    await groupsCol.doc(gid).delete().catch(() => undefined);
+    logger.warn('bot left group; binding removed', { gid });
     return;
   }
 
-  if (!gid) return;
-
-  // 尚未綁定任何群組時，第一個送來事件的群組視為家人群組（個人用，bot 只會在一個群組）。
-  // 涵蓋「邀請 bot 時 webhook 尚未開啟、join 事件遺失」的情況。
-  if (!cfg.groupId) {
-    await lineConfigRef.set({ groupId: gid, joinedAt: Timestamp.now() }, { merge: true });
-    cfg.groupId = gid;
-    logger.warn('auto-bound group from first event', { gid, userId: userIdOf(ev), type: ev.type });
-  }
-
-  // 其餘事件只處理已綁定群組。
-  if (gid !== cfg.groupId) {
-    logger.info('event from unbound group ignored', { gid, type: ev.type });
-    return;
-  }
   if (ev.type !== 'message') return;
-
   const mev = ev as webhook.MessageEvent;
   const userId = userIdOf(ev);
   const replyToken = mev.replyToken;
-  if (!isTraveler(userId)) {
-    // 初次設定：從 log 取得自己的 userId 後寫入 Secret TRAVELER_LINE_UID。
-    logger.info('message from non-traveler userId', { userId, type: mev.message.type });
+
+  // 綁定指令（任何群組都處理）
+  if (mev.message.type === 'text') {
+    const m = (mev.message as webhook.TextMessageContent).text.trim().match(/^綁定\s*(\d{6})$/);
+    if (m) {
+      const r = await bindGroupWithCode(gid, m[1], userId);
+      if (replyToken) {
+        await reply(replyToken, [
+          textMsg(
+            r === 'ok'
+              ? '✅ 綁定完成。之後行程起訖、離線預告與逾時提醒會在這裡通知。'
+              : r === 'not_owner'
+                ? '這組綁定碼不是你的，請由產生綁定碼的本人輸入。'
+                : '綁定碼無效或已過期（10 分鐘），請到管理頁重新產生。',
+          ),
+        ]);
+      }
+      return;
+    }
   }
 
+  const binding = (await groupsCol.doc(gid).get()).data();
+  if (!binding) {
+    // 未綁定群組：只在有人試著用指令時提示，其餘靜默
+    if (mev.message.type === 'text' && replyToken) {
+      const t = (mev.message as webhook.TextMessageContent).text;
+      if (/在哪|平安|行程|離線|結束|備註/.test(t)) await reply(replyToken, [textMsg(HELP_UNBOUND)]);
+    }
+    return;
+  }
+  const ownerUid = binding.ownerUid;
+  const isOwner = userId === ownerUid;
+
   if (mev.message.type === 'location') {
-    if (!isTraveler(userId)) return;
+    if (!isOwner) return;
     const loc = mev.message as webhook.LocationMessageContent;
-    const trip = await getActiveTrip();
+    const trip = await getActiveTrip(ownerUid);
     if (!trip) {
       if (replyToken) await reply(replyToken, [textMsg('目前沒有進行中的行程，未記錄。')]);
       return;
@@ -128,30 +156,26 @@ async function handleEvent(ev: Event): Promise<void> {
   if (mev.message.type !== 'text' || !replyToken) return;
   const text = (mev.message as webhook.TextMessageContent).text.trim();
 
-  // 旅行者指令
-  if (isTraveler(userId)) {
+  if (isOwner) {
     const offline = text.match(/^離線\s*(\d{1,3})$/);
     if (offline) {
       const hours = Number(offline[1]);
-      if (hours < 1 || hours > 168) {
-        await reply(replyToken, [textMsg('離線時數需在 1–168 之間。')]);
-        return;
-      }
-      const trip = await getActiveTrip();
+      if (hours < 1 || hours > 168) return void (await reply(replyToken, [textMsg('離線時數需在 1–168 之間。')]));
+      const trip = await getActiveTrip(ownerUid);
       if (!trip) return void (await reply(replyToken, [textMsg('目前沒有進行中的行程。')]));
       const out = await setOffline(trip, hours);
       await reply(replyToken, [textMsg(`已設定離線至 ${fmtBoth(out.offlineUntil, trip.data().travelerTz)}，期間不會警報。`)]);
       return;
     }
     if (text === '結束') {
-      const trip = await getActiveTrip();
+      const trip = await getActiveTrip(ownerUid);
       if (!trip) return void (await reply(replyToken, [textMsg('目前沒有進行中的行程。')]));
       await endTrip(trip, '旅行者以 LINE 指令結案');
       return;
     }
     const noteCmd = text.match(/^備註\s+(.+)$/s);
     if (noteCmd) {
-      const trip = await getActiveTrip();
+      const trip = await getActiveTrip(ownerUid);
       if (!trip) return void (await reply(replyToken, [textMsg('目前沒有進行中的行程。')]));
       const ok = await updateLastNote(trip, noteCmd[1].slice(0, 200));
       await reply(replyToken, [textMsg(ok ? '已補上備註。' : '尚無打卡可補備註。')]);
@@ -159,20 +183,16 @@ async function handleEvent(ev: Event): Promise<void> {
     }
   }
 
-  // 任何成員的查詢（reply 免費）
   if (/在哪|平安/.test(text)) {
-    const trip = await getActiveTrip();
+    const trip = await getActiveTrip(ownerUid);
     if (!trip) return void (await reply(replyToken, [textMsg('目前沒有進行中的行程。')]));
     await reply(replyToken, whereMessages(trip.data(), familyUrl(trip.data().groupReadToken)));
     return;
   }
   if (/行程/.test(text)) {
-    const trip = await getActiveTrip();
+    const trip = await getActiveTrip(ownerUid);
     if (!trip) return void (await reply(replyToken, [textMsg('目前沒有進行中的行程。')]));
     const recent = await recentForTrip(trip.id, 5);
     await reply(replyToken, recentListMessages(trip.data(), recent, familyUrl(trip.data().groupReadToken)));
-    return;
   }
 }
-
-export { HttpError };

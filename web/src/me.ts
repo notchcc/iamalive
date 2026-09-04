@@ -2,12 +2,12 @@
  * /me 管理頁：寫入 token、狀態、建立/結束行程、備援打卡（定位或手動選點）、預告離線、家人連結。
  */
 import L from 'leaflet';
-import { ApiError, api, getToken, setToken } from './api';
+import { ApiError, api } from './api';
 import { renderFamilyPage } from './family';
 import { createMap } from './mapview';
 import { extractPhotoMeta, fmtBytes, shrinkImage } from './photo';
 import { CITY_NAMES, TAIPEI, fmtBoth, fmtDateTime, toLocalInput } from './time';
-import type { FlightInput, FlightJson, StatusJson, TripJson, WatcherJson } from './types';
+import type { FlightInput, FlightJson, KeyJson, StatusJson, TripJson, WatcherJson } from './types';
 
 function esc(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
@@ -43,6 +43,7 @@ function toLocalInputValue(d: Date): string {
 export function renderMePage(root: HTMLElement): () => void {
   let status: StatusJson | null = null;
   let watchers: WatcherJson[] = [];
+  let keys: KeyJson[] = [];
   let familyCleanup: (() => void) | null = null;
   let pickMap: L.Map | null = null;
   let pickMarker: L.CircleMarker | null = null;
@@ -59,7 +60,10 @@ export function renderMePage(root: HTMLElement): () => void {
   const errText = (e: unknown): string => {
     if (e instanceof ApiError) {
       const map: Record<string, string> = {
-        UNAUTHORIZED: 'token 錯誤',
+        UNAUTHORIZED: '尚未登入或登入已過期',
+        CSRF: '請重新整理頁面後再試',
+        TOO_MANY_KEYS: '金鑰最多 10 把',
+        KEY_NOT_FOUND: '找不到這把金鑰',
         NO_ACTIVE_TRIP: '目前沒有進行中的行程',
         ACTIVE_TRIP_EXISTS: '已有進行中的行程',
         TRIP_NOT_ACTIVE: '行程不是進行中',
@@ -75,33 +79,28 @@ export function renderMePage(root: HTMLElement): () => void {
   };
 
   const renderGate = (): void => {
+    const q = new URLSearchParams(location.search);
+    const hint = q.get('login') === 'denied' ? '你取消了 LINE 授權。' : q.get('login') === 'invalid' ? '登入連結已失效，請再試一次。' : '';
     root.innerHTML = `
       <div class="page me">
         <h1>iamalive 管理</h1>
-        <form id="gate" class="card">
-          <label>寫入 token<input name="token" type="password" autocomplete="off" required /></label>
-          <button type="submit">進入</button>
-          <p class="muted">token 只存在這台裝置的瀏覽器中。</p>
-        </form>
+        <div class="card login">
+          <p>用 LINE 帳號登入後即可建立行程、綁定家人群組、產生捷徑金鑰。</p>
+          ${hint ? `<p class="bad-text">${esc(hint)}</p>` : ''}
+          <a class="btn-line" href="/api/auth/line/start">用 LINE 登入</a>
+          <p class="muted small">登入狀態保留 30 天。</p>
+        </div>
       </div>`;
-    root.querySelector<HTMLFormElement>('#gate')!.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const fd = new FormData(e.currentTarget as HTMLFormElement);
-      setToken(String(fd.get('token') ?? '').trim());
-      await load();
-    });
   };
 
   const load = async (): Promise<void> => {
     try {
       status = await api.status();
-      watchers = status.activeTrip ? await api.watchers(status.activeTrip.id) : [];
+      [watchers, keys] = await Promise.all([status.activeTrip ? api.watchers(status.activeTrip.id) : Promise.resolve([]), api.keys()]);
       renderMain();
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) {
-        setToken('');
         renderGate();
-        toast('token 錯誤', 'err');
       } else {
         toast(errText(e), 'err');
       }
@@ -120,13 +119,31 @@ export function renderMePage(root: HTMLElement): () => void {
     const t = status.activeTrip;
     root.innerHTML = `
       <div class="page me">
-        <h1>iamalive 管理 <button id="logout" class="link">登出</button></h1>
+        <h1>iamalive 管理
+          <span class="who">${status.user.pictureUrl ? `<img class="avatar" src="${esc(status.user.pictureUrl)}" alt="" />` : ''}${esc(status.user.displayName ?? status.user.uid)}
+          <button id="logout" class="link">登出</button></span></h1>
 
         <section class="card">
-          <h2>系統狀態</h2>
-          <div>LINE 群組：${status.groupBound ? '<b class="ok-text">已綁定</b>' : '<b class="bad-text">未綁定</b>（把官方帳號邀進家人群組）'}
-            ${status.groupBound ? '<button id="unbind" class="link danger">解除綁定</button>' : ''}</div>
-          <div>本月推播：${status.pushCount} / ${status.monthlyQuota}（${esc(status.monthKey)}）</div>
+          <h2>家人 LINE 群組</h2>
+          ${
+            status.groupBound
+              ? `<div><b class="ok-text">已綁定</b> <button id="unbind" class="link danger">解除綁定</button></div>`
+              : `<div><b class="bad-text">尚未綁定</b></div>
+                 <ol class="steps">
+                   <li>把官方帳號 <b>@574stmif</b>（iamalive）邀請進家人群組</li>
+                   <li>按下方按鈕取得 6 位數綁定碼</li>
+                   <li>由你本人在群組輸入「綁定 123456」</li>
+                 </ol>
+                 <div class="row"><button id="bind-code">產生綁定碼</button><span id="bind-code-out" class="bind-code"></span></div>`
+          }
+          <div class="muted small">本月推播 ${status.pushCount} / ${status.monthlyQuota}（${esc(status.monthKey)}，所有使用者共用）</div>
+        </section>
+
+        <section class="card">
+          <h2>捷徑金鑰 <span class="muted">給 iOS 捷徑用的 X-Api-Key</span></h2>
+          <ul id="keys" class="key-list"></ul>
+          <form id="add-key" class="row"><input name="label" placeholder="標籤（如 iPhone 15）" maxlength="30" required /><button>產生金鑰</button></form>
+          <div id="new-key" hidden></div>
         </section>
 
         ${t ? renderTripSection(t) : renderCreateSection()}
@@ -137,14 +154,77 @@ export function renderMePage(root: HTMLElement): () => void {
         ${t ? `<section class="card"><h2>家人頁預覽</h2><div id="family-embed"></div></section>` : ''}
       </div>`;
 
-    root.querySelector('#logout')!.addEventListener('click', () => {
-      setToken('');
+    root.querySelector('#logout')!.addEventListener('click', async () => {
+      await api.logout().catch(() => undefined);
       renderGate();
     });
     root.querySelector('#unbind')?.addEventListener('click', async () => {
-      if (!confirm('確定解除 LINE 群組綁定？之後重新邀請官方帳號進群組即可重綁。')) return;
+      if (!confirm('確定解除 LINE 群組綁定？之後重新產生綁定碼即可重綁。')) return;
       await api.unbindLine();
       await load();
+    });
+    root.querySelector<HTMLButtonElement>('#bind-code')?.addEventListener('click', async () => {
+      const out = root.querySelector<HTMLElement>('#bind-code-out')!;
+      try {
+        const r = await api.bindCode();
+        out.textContent = `綁定 ${r.code}`;
+        out.title = `10 分鐘內有效`;
+        toast('在群組輸入這串文字即可綁定（10 分鐘內）');
+      } catch (e) {
+        toast(errText(e), 'err');
+      }
+    });
+
+    // ---- 金鑰 ----
+    const renderKeys = (): void => {
+      const ul = root.querySelector<HTMLElement>('#keys')!;
+      ul.innerHTML = keys.length
+        ? keys
+            .map(
+              (k) => `<li class="row"><span><b>${esc(k.label)}</b> <code>${esc(k.prefix)}…</code></span>
+                <span class="muted small">建立 ${esc(fmtDateTime(new Date(k.createdAt), TAIPEI))}${k.lastUsedAt ? ` · 最後使用 ${esc(fmtDateTime(new Date(k.lastUsedAt), TAIPEI))}` : ' · 尚未使用'}</span>
+                <button class="danger" data-revoke="${esc(k.id)}">撤銷</button></li>`,
+            )
+            .join('')
+        : '<li class="muted">尚無金鑰。產生一把後填進捷徑的 X-Api-Key。</li>';
+      ul.querySelectorAll<HTMLButtonElement>('[data-revoke]').forEach((b) =>
+        b.addEventListener('click', async () => {
+          if (!confirm('撤銷這把金鑰？使用它的捷徑會立刻失效。')) return;
+          try {
+            await api.revokeKey(b.dataset.revoke!);
+            keys = await api.keys();
+            renderKeys();
+          } catch (e) {
+            toast(errText(e), 'err');
+          }
+        }),
+      );
+    };
+    renderKeys();
+    root.querySelector<HTMLFormElement>('#add-key')!.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const form = e.currentTarget as HTMLFormElement;
+      const label = String(new FormData(form).get('label') ?? '').trim();
+      try {
+        const r = await api.createKey(label);
+        keys = await api.keys();
+        renderKeys();
+        form.reset();
+        const box = root.querySelector<HTMLElement>('#new-key')!;
+        box.hidden = false;
+        box.innerHTML = `<div class="new-key"><div>「${esc(r.label)}」的金鑰只會顯示這一次，請立刻複製到捷徑：</div>
+          <div class="row"><input readonly value="${esc(r.key)}" /><button class="secondary" id="copy-key">複製</button></div></div>`;
+        box.querySelector('#copy-key')!.addEventListener('click', async () => {
+          try {
+            await navigator.clipboard.writeText(r.key);
+            toast('已複製');
+          } catch {
+            toast('無法複製，請手動選取', 'err');
+          }
+        });
+      } catch (err) {
+        toast(errText(err), 'err');
+      }
     });
 
     if (t) bindTripSection(t);
@@ -590,8 +670,7 @@ export function renderMePage(root: HTMLElement): () => void {
     );
   };
 
-  if (getToken()) void load();
-  else renderGate();
+  void load();
 
   return () => {
     familyCleanup?.();

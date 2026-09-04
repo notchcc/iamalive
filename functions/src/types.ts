@@ -16,6 +16,8 @@ export interface FlightSegment {
 }
 
 export interface Trip {
+  /** 擁有者（LINE userId）。 */
+  ownerUid: string;
   title: string;
   startAt: Timestamp;
   endAt: Timestamp;
@@ -90,11 +92,39 @@ export interface View {
   updatedAt: Timestamp;
 }
 
+/** 全域推播額度計數（config/line）。 */
 export interface LineConfig {
-  groupId: string | null;
-  joinedAt: Timestamp | null;
   monthKey: string;
   pushCount: number;
+}
+
+export interface User {
+  displayName: string;
+  pictureUrl: string | null;
+  createdAt: Timestamp;
+  lastLoginAt: Timestamp;
+}
+
+/** apiKeys/{sha256(key)} */
+export interface ApiKey {
+  uid: string;
+  label: string;
+  /** 金鑰前 8 碼，列表辨識用。 */
+  prefix: string;
+  createdAt: Timestamp;
+  lastUsedAt: Timestamp | null;
+}
+
+/** groups/{lineGroupId}：一個群組綁一位擁有者。 */
+export interface GroupBinding {
+  ownerUid: string;
+  boundAt: Timestamp;
+}
+
+/** bindCodes/{6位數}：/me 產生，10 分鐘有效，在群組輸入「綁定 123456」使用。 */
+export interface BindCode {
+  uid: string;
+  expiresAt: Timestamp;
 }
 
 export type PushKind = 'start' | 'end' | 'offline' | 'alert' | 'recovery';

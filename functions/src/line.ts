@@ -4,7 +4,7 @@
 import { messagingApi, validateSignature } from '@line/bot-sdk';
 import { logger } from 'firebase-functions/v2';
 import { LINE_CHANNEL_ACCESS_TOKEN, LINE_CHANNEL_SECRET } from './config.js';
-import { Timestamp, db, getLineConfig, lineConfigRef } from './db.js';
+import { Timestamp, db, groupIdForOwner, lineConfigRef } from './db.js';
 import { TAIPEI, fmtBoth, fmtDateTime, fmtHours, fmtTime, monthKey, tzLabel } from './time.js';
 import type { FlightSegment, PushKind, RecentItem, Trip } from './types.js';
 import { currentFlight } from './overdue-logic.js';
@@ -49,10 +49,10 @@ async function reserveQuota(kind: PushKind, now: Date): Promise<boolean> {
  * 推播到已綁定的家人群組。群組為單一收件對象，一次 push 不論物件數與人數只計 1 則。
  * 回傳是否實際送出。
  */
-export async function pushGroup(kind: PushKind, messages: Message[], now = new Date()): Promise<boolean> {
-  const cfg = await getLineConfig();
-  if (!cfg.groupId) {
-    logger.warn('pushGroup skipped: no group bound', { kind });
+export async function pushGroup(ownerUid: string, kind: PushKind, messages: Message[], now = new Date()): Promise<boolean> {
+  const groupId = await groupIdForOwner(ownerUid);
+  if (!groupId) {
+    logger.warn('pushGroup skipped: owner has no bound group', { kind, ownerUid });
     return false;
   }
   if (!(await reserveQuota(kind, now))) {
@@ -60,7 +60,7 @@ export async function pushGroup(kind: PushKind, messages: Message[], now = new D
     return false;
   }
   try {
-    await client().pushMessage({ to: cfg.groupId, messages: messages.slice(0, 5) });
+    await client().pushMessage({ to: groupId, messages: messages.slice(0, 5) });
     return true;
   } catch (err) {
     logger.error('pushGroup failed', { kind, err: String(err) });
