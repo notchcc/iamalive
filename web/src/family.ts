@@ -12,10 +12,8 @@ function esc(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
 }
 
-/** 城市名，若時區城市與輸入城市不同則附註時區城市，方便發現選錯時區。 */
-function cityTz(city: string, tz: string): string {
-  const label = tzLabel(tz);
-  return label === city ? esc(city) : `${esc(city)} <small>(${esc(label)})</small>`;
+function cityTz(city: string, _tz: string): string {
+  return esc(city);
 }
 
 export function renderFamilyPage(root: HTMLElement, token: string, tlOpts: TimelineOpts = {}): () => void {
