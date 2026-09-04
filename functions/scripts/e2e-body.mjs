@@ -453,6 +453,14 @@ async function main() {
   r = await call('PUT', `/trips/${trip.id}/flights`, { flights: [{ flightNo: 'X1', fromCity: 'a', fromTz: 'Nope/Zone', departLocal: '2026-09-10T12:00', toCity: 'b', toTz: 'Asia/Taipei', arriveLocal: '2026-09-10T13:00' }] });
   assert.equal(r.status, 400, 'invalid tz rejected');
   log('flights set + validated');
+  r = await call('GET', '/flights/lookup?flightNo=E2E1&date=2026-09-10');
+  assert.equal(r.status, 200, JSON.stringify(r.json));
+  assert.equal(r.json.legs.length, 1);
+  assert.equal(r.json.legs[0].fromTz, 'Asia/Taipei');
+  assert.equal(r.json.legs[0].arriveLocal, '2026-09-11T06:20');
+  r = await call('GET', '/flights/lookup?flightNo=bad!&date=2026-09-10');
+  assert.equal(r.status, 400);
+  log('flight lookup (stub) ok');
 
   const dep = new Date('2026-09-10T04:00:00Z');
   const arr = new Date('2026-09-10T16:00:00Z');

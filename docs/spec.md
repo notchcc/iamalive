@@ -248,6 +248,7 @@ service cloud.firestore {
 | POST | `/api/trips/:id/offline` | 預告離線 | `{ hours }` → `offlineUntil`、`nextDeadlineAt = offlineUntil + interval`，推「將離線至 T」 |
 | POST | `/api/checkin/photo` | 照片打卡 | `multipart/form-data`：`photo`（檔案，≤ 8 MB，jpeg/png/heic/webp）+ `lat`、`lng`、`accuracy?`、`note?`、`nextHours?`、`takenAt?`、`clientAt?`；存入 GCS 後走與 `/checkin` 相同流程，`source = photo` |
 | GET | `/api/p/:readToken/:photoId` | 家人頁取圖 | **不需寫入 token**；驗證 `views/{readToken}` 存在且照片屬於該行程後串流回傳，`Cache-Control: private, max-age=86400` |
+| GET | `/api/flights/lookup?flightNo=BR61&date=YYYY-MM-DD` | 航班查詢 | AeroDataBox（RapidAPI，Secret `RAPIDAPI_KEY`）；回傳各航段的 IATA、城市、**機場時區**、表定當地與 UTC 時間；以「班號_日期」快取 12 小時；未設金鑰回 503 |
 | PUT | `/api/trips/:id/flights` | 整批更新航段 | `{ flights: [{ flightNo, fromCity, fromTz, departLocal, toCity, toTz, arriveLocal }] }`，`*Local` 為 `YYYY-MM-DDTHH:mm` 當地時間；驗證時區有效、降落晚於起飛、單段 ≤ 30 小時 |
 | POST | `/api/trips/:id/watchers` | 新增家人頁連結 | 產生 readToken，建立 `views/{token}`，回傳連結 |
 | DELETE | `/api/trips/:id/watchers/:token` | 撤銷連結 | 刪 view |
@@ -367,7 +368,7 @@ reply 免費，不計額度。非旅行者傳的位置訊息忽略。
 - **登入**：未登入只顯示「用 LINE 登入」；已登入右上顯示名稱與頭像、登出。
 - **家人 LINE 群組**卡片：未綁定時顯示三步驟（邀請官方帳號、產生綁定碼、本人在群組輸入）；已綁定可解除。
 - **捷徑金鑰**卡片：列表（標籤、前 8 碼、建立與最後使用時間）、產生（只顯示一次、複製）、撤銷。
-- **航段**卡片：列表與刪除；新增表單含航班號碼、起飛城市 / 時區 / 當地時間、降落城市 / 時區 / 當地時間；時區欄為 datalist（常用城市中文對照），選時區自動帶入城市名，新增後下一段的起飛欄自動帶入上一段目的地。
+- **航段**卡片：先以「航班號碼 + 出發日期」查詢，列出各航段勾選加入（城市與時區自動帶入，多段航班一次加入）；手動輸入收合在下方備用；新增表單含航班號碼、起飛城市 / 時區 / 當地時間、降落城市 / 時區 / 當地時間；時區欄為 datalist（常用城市中文對照），選時區自動帶入城市名，新增後下一段的起飛欄自動帶入上一段目的地。
 - 內嵌與家人頁相同的地圖與時間軸元件（自用回顧）。
 
 ---

@@ -113,3 +113,19 @@ export interface WatcherJson {
   label: string;
   url: string;
 }
+
+export interface FlightLegJson {
+  flightNo: string;
+  airline: string | null;
+  status: string | null;
+  fromIata: string;
+  fromCity: string;
+  fromTz: string;
+  departLocal: string;
+  departUtc: string;
+  toIata: string;
+  toCity: string;
+  toTz: string;
+  arriveLocal: string;
+  arriveUtc: string;
+}

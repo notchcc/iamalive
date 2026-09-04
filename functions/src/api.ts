@@ -44,6 +44,7 @@ import {
 import { fmtDateTime, isValidTz, monthKey, zonedToUtc } from './time.js';
 import type { FlightSegment } from './types.js';
 import { parseMultipart } from './multipart.js';
+import { lookupFlight } from './flights-api.js';
 import { MAX_PHOTO_BYTES, isAllowedImage, readPhoto, savePhoto } from './photos.js';
 import { viewsCol } from './db.js';
 
@@ -446,6 +447,22 @@ export function createApp(): express.Express {
         nextDeadlineAt: out.nextDeadlineAt.toISOString(),
         pushed: out.pushed,
       });
+    }),
+  );
+
+  /** 航班查詢（AeroDataBox）：回傳該班號當日各航段，供前端帶入表單。 */
+  r.get(
+    '/flights/lookup',
+    wrap(async (req, res) => {
+      const q = z
+        .object({
+          flightNo: z.string().trim().regex(/^[A-Za-z0-9]{2,3}\s?\d{1,4}[A-Za-z]?$/, 'flight number like BR61'),
+          date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD'),
+        })
+        .parse(req.query);
+      const legs = await lookupFlight(q.flightNo, q.date);
+      res.setHeader('Cache-Control', 'private, max-age=600');
+      res.json({ legs });
     }),
   );
 

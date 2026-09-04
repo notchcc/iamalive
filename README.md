@@ -42,6 +42,7 @@ firebase functions:secrets:set LINE_CHANNEL_SECRET          # Messaging API
 firebase functions:secrets:set LINE_CHANNEL_ACCESS_TOKEN    # Messaging API 長效 token
 firebase functions:secrets:set LINE_LOGIN_CHANNEL_SECRET    # LINE Login
 openssl rand -base64 48 | firebase functions:secrets:set SESSION_SECRET --data-file -   # session 簽章金鑰
+firebase functions:secrets:set RAPIDAPI_KEY                 # 選填：AeroDataBox 航班查詢（RapidAPI）
 
 cp functions/.env.example functions/.env             # 填 PUBLIC_BASE_URL、PHOTO_BUCKET、LINE_LOGIN_CHANNEL_ID
 cp web/.env.example web/.env                         # 填 Firebase Web 設定與 MapTiler key

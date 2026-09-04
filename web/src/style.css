@@ -131,3 +131,9 @@ input[type="file"] { padding: 8px; }
 .key-list li { justify-content: space-between; }
 .key-list code { font-size: 12px; background: var(--bg); padding: 2px 6px; border-radius: 6px; }
 .new-key { background: var(--warn-soft); border: 1px solid #fde68a; border-radius: 10px; padding: 10px; margin-top: 8px; font-size: 14px; }
+.legs { list-style: none; margin: 8px 0; padding: 0; }
+.leg-pick { display: flex; gap: 10px; align-items: flex-start; padding: 8px; border: 1px solid var(--line); border-radius: 10px; margin-bottom: 6px; font-size: 14px; color: var(--text); }
+.leg-pick input { width: auto; margin-top: 4px; }
+.leg-pick small { display: block; }
+details.manual { margin-top: 8px; }
+details.manual summary { cursor: pointer; font-size: 14px; }

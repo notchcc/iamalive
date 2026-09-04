@@ -10,6 +10,8 @@ export const LINE_CHANNEL_ACCESS_TOKEN = defineSecret('LINE_CHANNEL_ACCESS_TOKEN
 export const LINE_LOGIN_CHANNEL_SECRET = defineSecret('LINE_LOGIN_CHANNEL_SECRET');
 /** session JWT 簽章金鑰（≥ 32 bytes 隨機）。 */
 export const SESSION_SECRET = defineSecret('SESSION_SECRET');
+/** RapidAPI 金鑰（AeroDataBox 航班查詢）。未設定時航班查詢回 503，其餘功能不受影響。 */
+export const RAPIDAPI_KEY = defineSecret('RAPIDAPI_KEY');
 /** LINE Login channel ID（非機密）。於 functions/.env 設定。 */
 export const LINE_LOGIN_CHANNEL_ID = defineString('LINE_LOGIN_CHANNEL_ID', { default: '' });
 
@@ -24,7 +26,8 @@ export const PHOTO_BUCKET = defineString('PHOTO_BUCKET', { default: '' });
 
 export const LINE_SECRETS = [LINE_CHANNEL_SECRET, LINE_CHANNEL_ACCESS_TOKEN];
 export const AUTH_SECRETS = [LINE_LOGIN_CHANNEL_SECRET, SESSION_SECRET];
-export const ALL_SECRETS = [...LINE_SECRETS, ...AUTH_SECRETS];
+export const EXT_SECRETS = [RAPIDAPI_KEY];
+export const ALL_SECRETS = [...LINE_SECRETS, ...AUTH_SECRETS, ...EXT_SECRETS];
 
 export function familyUrl(readToken: string): string {
   const base = PUBLIC_BASE_URL.value().replace(/\/+$/, '');

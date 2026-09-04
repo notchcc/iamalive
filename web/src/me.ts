@@ -7,7 +7,7 @@ import { renderFamilyPage } from './family';
 import { createMap } from './mapview';
 import { extractPhotoMeta, fmtBytes, shrinkImage } from './photo';
 import { CITY_NAMES, TAIPEI, fmtBoth, fmtDateTime, toLocalInput } from './time';
-import type { FlightInput, FlightJson, KeyJson, StatusJson, TripJson, WatcherJson } from './types';
+import type { FlightInput, FlightJson, FlightLegJson, KeyJson, StatusJson, TripJson, WatcherJson } from './types';
 
 function esc(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
@@ -72,6 +72,9 @@ export function renderMePage(root: HTMLElement): () => void {
         UNSUPPORTED_IMAGE_TYPE: '不支援的圖片格式',
         FILE_TOO_LARGE: '照片超過 8 MB',
         CHECKIN_NOT_FOUND: '找不到這筆打卡',
+        FLIGHT_LOOKUP_UNAVAILABLE: '航班查詢未設定金鑰',
+        FLIGHT_LOOKUP_QUOTA: '航班查詢額度已用完，請改用手動輸入',
+        FLIGHT_LOOKUP_FAILED: '航班查詢失敗，請稍後再試或手動輸入',
       };
       return map[e.code] ?? e.message;
     }
@@ -308,6 +311,15 @@ export function renderMePage(root: HTMLElement): () => void {
       <section class="card">
         <h2>航段 <span class="muted">飛行中不警報，落地後 3 小時內回報</span></h2>
         <ul id="flight-list" class="flight-list"></ul>
+        <form id="lookup-flight" class="lookup">
+          <div class="row">
+            <input name="flightNo" placeholder="航班號碼，如 BR61" maxlength="8" required style="max-width:160px" />
+            <input name="date" type="date" required style="max-width:170px" />
+            <button type="submit">查詢航班</button>
+          </div>
+          <div id="lookup-result"></div>
+        </form>
+        <details class="manual"><summary class="muted">手動輸入航段</summary>
         <form id="add-flight">
           <div class="grid2">
             <label>航班號碼<input name="flightNo" maxlength="10" required placeholder="BR61" /></label>
@@ -320,6 +332,7 @@ export function renderMePage(root: HTMLElement): () => void {
           </div>
           <button type="submit">新增航段</button>
         </form>
+        </details>
       </section>
 
       <section class="card">
@@ -426,6 +439,61 @@ export function renderMePage(root: HTMLElement): () => void {
       );
     };
     renderFlightList();
+
+    // ---- 航班查詢 → 勾選加入 ----
+    const lookupForm = root.querySelector<HTMLFormElement>('#lookup-flight')!;
+    const lookupOut = root.querySelector<HTMLElement>('#lookup-result')!;
+    (lookupForm.elements.namedItem('date') as HTMLInputElement).value = new Date(t.startAt).toISOString().slice(0, 10);
+    lookupForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const fd = new FormData(lookupForm);
+      const flightNo = String(fd.get('flightNo') ?? '').trim().toUpperCase();
+      const date = String(fd.get('date') ?? '');
+      lookupOut.innerHTML = '<p class="muted">查詢中…</p>';
+      let legs: FlightLegJson[] = [];
+      try {
+        legs = (await api.lookupFlight(flightNo, date)).legs;
+      } catch (err) {
+        lookupOut.innerHTML = `<p class="bad-text">${esc(errText(err))}</p>`;
+        return;
+      }
+      if (!legs.length) {
+        lookupOut.innerHTML = '<p class="muted">查不到這個航班。確認班號與出發日期，或改用下方手動輸入。</p>';
+        return;
+      }
+      lookupOut.innerHTML = `<ul class="legs">${legs
+        .map(
+          (l, i) => `<li><label class="leg-pick"><input type="checkbox" data-leg="${i}" checked />
+            <span><b>${esc(l.flightNo)}</b> ${esc(l.airline ?? '')}<br>
+            ${esc(l.fromCity)}（${esc(l.fromIata)}）${esc(l.departLocal.replace('T', ' '))} → ${esc(l.toCity)}（${esc(l.toIata)}）${esc(l.arriveLocal.replace('T', ' '))}
+            <small class="muted">各地當地時間 · ${esc(l.fromTz)} → ${esc(l.toTz)}</small></span></label></li>`,
+        )
+        .join('')}</ul>
+        <div class="row"><button type="button" id="add-legs">加入勾選的航段</button></div>`;
+      lookupOut.querySelector<HTMLButtonElement>('#add-legs')!.addEventListener('click', async () => {
+        const picked = [...lookupOut.querySelectorAll<HTMLInputElement>('[data-leg]:checked')].map((c) => legs[Number(c.dataset.leg)]);
+        if (!picked.length) return;
+        const inputs: FlightInput[] = picked.map((l) => ({
+          flightNo: l.flightNo,
+          fromCity: l.fromCity,
+          fromTz: l.fromTz,
+          departLocal: l.departLocal,
+          toCity: l.toCity,
+          toTz: l.toTz,
+          arriveLocal: l.arriveLocal,
+        }));
+        try {
+          const r = await api.setFlights(t.id, [...flights.map(toInput), ...inputs]);
+          flights = r.flights;
+          renderFlightList();
+          lookupOut.innerHTML = '';
+          lookupForm.reset();
+          toast(`已加入 ${inputs.length} 段`);
+        } catch (err) {
+          toast(errText(err), 'err');
+        }
+      });
+    });
 
     const flightForm = root.querySelector<HTMLFormElement>('#add-flight')!;
     // 選了時區就把空白的城市欄位帶入城市名
