@@ -79,7 +79,7 @@ async function main() {
   const now = new Date();
   r = await call('POST', '/trips', {
     title: 'E2E 東京',
-    startAt: new Date(now.getTime() - H).toISOString(),
+    startAt: new Date(now.getTime() - 48 * H).toISOString(), // 早於所有以「今天台北時間」構造的掃描時刻
     endAt: new Date(now.getTime() + 7 * 24 * H).toISOString(),
     intervalHours: 12,
   });
@@ -121,6 +121,8 @@ async function main() {
   assert.equal(view.recent.length, 1);
   assert.equal(view.recent[0].tz, 'Asia/Tokyo');
   assert.equal(view.recent[0].note, '抵達東京車站');
+  assert.ok('place' in view.recent[0], 'recent item has place field');
+  console.log('      place =', view.recent[0].place);
   assert.equal(view.travelerTz, 'Asia/Tokyo');
   log('view projection updated');
 
@@ -233,6 +235,42 @@ async function main() {
   view = (await db.doc(`views/${trip.groupReadToken}`).get()).data();
   assert.equal(view.alerted, false);
   log('checkin after alert = recovered, flags reset');
+
+  // ---- 航段：期限落在飛行中 → 順延到降落 + 3h ----
+  // 用固定 UTC 時刻，避開安靜時段：起飛 台北 09/10 12:00 (04:00Z)，降落 維也納 09/10 18:00 (16:00Z, CEST)
+  r = await call('PUT', `/trips/${trip.id}/flights`, {
+    flights: [
+      { flightNo: 'br61', fromCity: '台北', fromTz: 'Asia/Taipei', departLocal: '2026-09-10T12:00', toCity: '維也納', toTz: 'Europe/Vienna', arriveLocal: '2026-09-10T18:00' },
+    ],
+  });
+  assert.equal(r.status, 200, JSON.stringify(r.json));
+  assert.equal(r.json.flights[0].flightNo, 'BR61');
+  assert.equal(r.json.flights[0].departAt, '2026-09-10T04:00:00.000Z');
+  assert.equal(r.json.flights[0].arriveAt, '2026-09-10T16:00:00.000Z');
+  assert.equal(r.json.flights[0].arriveLocal, '09/10 18:00');
+  r = await call('GET', '/trips/active');
+  assert.equal(r.json.flights.length, 1);
+  view = (await db.doc(`views/${trip.groupReadToken}`).get()).data();
+  assert.equal(view.flights.length, 1, 'view projection carries flights');
+  r = await call('PUT', `/trips/${trip.id}/flights`, { flights: [{ flightNo: 'X1', fromCity: 'a', fromTz: 'Nope/Zone', departLocal: '2026-09-10T12:00', toCity: 'b', toTz: 'Asia/Taipei', arriveLocal: '2026-09-10T13:00' }] });
+  assert.equal(r.status, 400, 'invalid tz rejected');
+  log('flights set + validated');
+
+  const dep = new Date('2026-09-10T04:00:00Z');
+  const arr = new Date('2026-09-10T16:00:00Z');
+  await tripRef.update({ alerted: false, alertCount: 0, lastAlertAt: null, morningResendDue: false, morningResent: false, offlineUntil: null,
+    nextDeadlineAt: Timestamp.fromDate(new Date(dep.getTime() + 2 * H)) });
+  res = await runOverdueScan(new Date(dep.getTime() + 6 * H));          // 飛行中（台北 18:00）
+  assert.equal(res.alerts, 0, 'no alert in flight');
+  res = await runOverdueScan(new Date(arr.getTime() + 2 * H));          // 落地 2h（台北 09/11 02:00，安靜時段但仍不到寬限）
+  assert.equal(res.alerts, 0, 'no alert within landing grace');
+  res = await runOverdueScan(new Date(arr.getTime() + 3.5 * H));        // 落地 3.5h
+  assert.equal(res.alerts, 1, 'alert after landing grace');
+  t = (await tripRef.get()).data();
+  assert.equal(t.alerted, true);
+  log('flight window suppresses alerts until landing + grace');
+  await call('PUT', `/trips/${trip.id}/flights`, { flights: [] });
+  await tripRef.update({ alerted: false, alertCount: 0, lastAlertAt: null, morningResendDue: false, morningResent: false });
 
   // 自動結案：endAt 25 小時前
   await tripRef.update({

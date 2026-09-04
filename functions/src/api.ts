@@ -18,9 +18,11 @@ import {
   recordCheckin,
   removeWatcher,
   requireActiveTrip,
+  setFlights,
   setOffline,
 } from './trips.js';
-import { monthKey } from './time.js';
+import { fmtDateTime, isValidTz, monthKey, zonedToUtc } from './time.js';
+import type { FlightSegment } from './types.js';
 
 function safeEqual(a: string, b: string): boolean {
   const ab = Buffer.from(a);
@@ -65,6 +67,31 @@ const CreateTripSchema = z
   .refine((v) => v.endAt > v.startAt, { message: 'endAt must be after startAt' });
 
 const OfflineSchema = z.object({ hours: z.number().min(1).max(168) });
+
+const localDateTime = z.string().regex(/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?$/, 'YYYY-MM-DDTHH:mm');
+const tzString = z.string().min(1).max(64).refine(isValidTz, 'invalid IANA timezone');
+const FlightInputSchema = z
+  .object({
+    flightNo: z.string().trim().min(2).max(10),
+    fromCity: z.string().trim().min(1).max(30),
+    fromTz: tzString,
+    departLocal: localDateTime,
+    toCity: z.string().trim().min(1).max(30),
+    toTz: tzString,
+    arriveLocal: localDateTime,
+  })
+  .transform((f) => ({
+    flightNo: f.flightNo.toUpperCase(),
+    fromCity: f.fromCity,
+    fromTz: f.fromTz,
+    departAt: zonedToUtc(f.departLocal, f.fromTz),
+    toCity: f.toCity,
+    toTz: f.toTz,
+    arriveAt: zonedToUtc(f.arriveLocal, f.toTz),
+  }))
+  .refine((f) => f.arriveAt > f.departAt, { message: 'arrive must be after depart' })
+  .refine((f) => f.arriveAt.getTime() - f.departAt.getTime() <= 30 * 3600e3, { message: 'segment longer than 30h' });
+const FlightsSchema = z.object({ flights: z.array(FlightInputSchema).max(20) });
 const WatcherSchema = z.object({ label: z.string().min(1).max(20) });
 
 type Handler = (req: Request, res: Response) => Promise<void>;
@@ -74,9 +101,24 @@ const wrap =
     fn(req, res).catch(next);
   };
 
+function flightJson(f: FlightSegment) {
+  return {
+    flightNo: f.flightNo,
+    fromCity: f.fromCity,
+    fromTz: f.fromTz,
+    departAt: f.departAt.toDate().toISOString(),
+    departLocal: fmtDateTime(f.departAt.toDate(), f.fromTz),
+    toCity: f.toCity,
+    toTz: f.toTz,
+    arriveAt: f.arriveAt.toDate().toISOString(),
+    arriveLocal: fmtDateTime(f.arriveAt.toDate(), f.toTz),
+  };
+}
+
 function tripJson(id: string, t: FirebaseFirestore.DocumentData) {
   const ts = (v: Timestamp | null | undefined) => (v ? v.toDate().toISOString() : null);
   return {
+    flights: ((t.flights ?? []) as FlightSegment[]).map(flightJson),
     id,
     title: t.title,
     status: t.status,
@@ -86,6 +128,7 @@ function tripJson(id: string, t: FirebaseFirestore.DocumentData) {
     travelerTz: t.travelerTz,
     lastCheckinAt: ts(t.lastCheckinAt),
     lastCheckinGeo: t.lastCheckinGeo ? { lat: t.lastCheckinGeo.latitude, lng: t.lastCheckinGeo.longitude } : null,
+    lastCheckinPlace: t.lastCheckinPlace ?? null,
     nextDeadlineAt: ts(t.nextDeadlineAt),
     offlineUntil: ts(t.offlineUntil),
     alerted: t.alerted,
@@ -193,6 +236,19 @@ export function createApp(): express.Express {
         nextDeadlineAt: out.nextDeadlineAt.toISOString(),
         pushed: out.pushed,
       });
+    }),
+  );
+
+  r.put(
+    '/trips/:id/flights',
+    wrap(async (req, res) => {
+      const { flights } = FlightsSchema.parse(req.body);
+      const trip = await requireTrip(req.params.id);
+      const saved = await setFlights(
+        trip,
+        flights.map((f) => ({ ...f, departAt: Timestamp.fromDate(f.departAt), arriveAt: Timestamp.fromDate(f.arriveAt) })),
+      );
+      res.json({ ok: true, flights: saved.map(flightJson) });
     }),
   );
 

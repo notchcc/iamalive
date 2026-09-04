@@ -8,8 +8,41 @@ export interface RecentItem {
   acc: number | null;
   src: CheckinSource;
   tz: string;
+  place?: string | null;
   note: string;
   at: Timestamp;
+}
+
+export interface FlightSeg {
+  flightNo: string;
+  fromCity: string;
+  fromTz: string;
+  departAt: Timestamp;
+  toCity: string;
+  toTz: string;
+  arriveAt: Timestamp;
+}
+
+export interface FlightJson {
+  flightNo: string;
+  fromCity: string;
+  fromTz: string;
+  departAt: string;
+  departLocal: string;
+  toCity: string;
+  toTz: string;
+  arriveAt: string;
+  arriveLocal: string;
+}
+
+export interface FlightInput {
+  flightNo: string;
+  fromCity: string;
+  fromTz: string;
+  departLocal: string;
+  toCity: string;
+  toTz: string;
+  arriveLocal: string;
 }
 
 export interface View {
@@ -23,6 +56,7 @@ export interface View {
   nextDeadlineAt: Timestamp;
   offlineUntil: Timestamp | null;
   alerted: boolean;
+  flights?: FlightSeg[];
   recent: RecentItem[];
   updatedAt: Timestamp;
 }
@@ -37,12 +71,14 @@ export interface TripJson {
   travelerTz: string;
   lastCheckinAt: string | null;
   lastCheckinGeo: { lat: number; lng: number } | null;
+  lastCheckinPlace: string | null;
   nextDeadlineAt: string;
   offlineUntil: string | null;
   alerted: boolean;
   alertCount: number;
   groupReadToken: string;
   familyUrl: string;
+  flights: FlightJson[];
 }
 
 export interface StatusJson {

@@ -6,7 +6,8 @@ import { logger } from 'firebase-functions/v2';
 import { LINE_CHANNEL_ACCESS_TOKEN, LINE_CHANNEL_SECRET } from './config.js';
 import { Timestamp, db, getLineConfig, lineConfigRef } from './db.js';
 import { TAIPEI, fmtBoth, fmtDateTime, fmtHours, fmtTime, monthKey, tzLabel } from './time.js';
-import type { PushKind, RecentItem, Trip } from './types.js';
+import type { FlightSegment, PushKind, RecentItem, Trip } from './types.js';
+import { currentFlight } from './overdue-logic.js';
 
 export type Message = messagingApi.Message;
 
@@ -99,7 +100,30 @@ function lastReportLine(trip: Trip, now: Date): string {
   if (!trip.lastCheckinAt) return '尚無任何回報';
   const last = trip.lastCheckinAt.toDate();
   const ago = fmtHours((now.getTime() - last.getTime()) / 3_600_000);
-  return `最後回報 ${fmtBoth(last, trip.travelerTz)}，${ago}前`;
+  const where = trip.lastCheckinPlace ? `於 ${trip.lastCheckinPlace} ` : '';
+  return `最後回報 ${where}${fmtBoth(last, trip.travelerTz)}，${ago}前`;
+}
+
+function flightWindows(trip: Trip) {
+  return (trip.flights ?? []).map((f) => ({ ...f, departAt: f.departAt.toDate(), arriveAt: f.arriveAt.toDate() }));
+}
+
+/** 飛行中的一行描述，非飛行中回傳 null。 */
+export function flightLine(trip: Trip, now: Date): string | null {
+  const f = currentFlight(flightWindows(trip), now);
+  if (!f) return null;
+  return `✈️ 飛行中 ${f.flightNo} ${f.fromCity} → ${f.toCity}，預計 ${fmtBoth(f.arriveAt, f.toTz)} 降落`;
+}
+
+/** 下一段尚未起飛的航段描述。 */
+export function nextFlightLine(trip: Trip, now: Date): string | null {
+  const f = flightWindows(trip).find((x) => x.departAt.getTime() > now.getTime());
+  if (!f) return null;
+  return `下一段 ${f.flightNo} ${f.fromCity} → ${f.toCity}，${fmtBoth(f.departAt, f.fromTz)} 起飛`;
+}
+
+export function flightSummary(f: FlightSegment): string {
+  return `${f.flightNo} ${f.fromCity} ${fmtDateTime(f.departAt.toDate(), f.fromTz)} → ${f.toCity} ${fmtDateTime(f.arriveAt.toDate(), f.toTz)}（各地當地時間）`;
 }
 
 function nowLine(trip: Trip, now: Date): string {
@@ -111,9 +135,11 @@ function nowLine(trip: Trip, now: Date): string {
 export function startMessages(trip: Trip, url: string): Message[] {
   const s = fmtDateTime(trip.startAt.toDate(), TAIPEI);
   const e = fmtDateTime(trip.endAt.toDate(), TAIPEI);
+  const flights = (trip.flights ?? []).slice(0, 6).map((f) => `• ${flightSummary(f)}`);
   return [
     textMsg(
       `🧳 行程開始：${trip.title}\n${s} → ${e}（台北）\n預計每 ${trip.intervalHours} 小時回報一次。\n` +
+        (flights.length ? `航段：\n${flights.join('\n')}\n` : '') +
         `逾時未回報時會在這裡提醒。查看地圖與時間軸：${url}`,
     ),
   ];
@@ -131,10 +157,20 @@ export function offlineMessages(trip: Trip, until: Date, url: string): Message[]
   ];
 }
 
-export function recoveryMessages(trip: Trip, lat: number, lng: number, at: Date, tz: string, note: string, url: string): Message[] {
+export function recoveryMessages(
+  trip: Trip,
+  lat: number,
+  lng: number,
+  at: Date,
+  tz: string,
+  place: string | null,
+  note: string,
+  url: string,
+): Message[] {
+  const where = place ?? tzLabel(tz);
   return [
-    locationMsg(`✅ ${trip.title} 已恢復回報`, `${fmtBoth(at, tz)}${note ? ` · ${note}` : ''}`, lat, lng),
-    textMsg(`已恢復回報 · ${fmtBoth(at, tz)}${note ? `\n備註：${note}` : ''}\n${url}`),
+    locationMsg(`✅ ${trip.title} 已恢復回報 · ${where}`, `${fmtBoth(at, tz)}${note ? ` · ${note}` : ''}`, lat, lng),
+    textMsg(`已恢復回報 · ${where}\n${fmtBoth(at, tz)}${note ? `\n備註：${note}` : ''}\n${url}`),
   ];
 }
 
@@ -147,8 +183,12 @@ export interface AlertOpts {
 export function alertMessages(trip: Trip, opts: AlertOpts, url: string, now = new Date()): Message[] {
   const prefix = opts.morning ? '（早安補發）' : '';
   const head = `${prefix}⚠️ ${trip.title} 尚未回報`;
+  const landed = flightWindows(trip)
+    .filter((f) => f.arriveAt.getTime() <= now.getTime() && now.getTime() - f.arriveAt.getTime() < 24 * 3_600_000)
+    .pop();
+  const landedLine = landed ? `${landed.flightNo} 預計已於 ${fmtBoth(landed.arriveAt, landed.toTz)} 降落 ${landed.toCity}。\n` : '';
   const body =
-    `已超過預定回報時間 ${fmtHours(opts.overdueH)}。\n` +
+    `已超過預定回報時間 ${fmtHours(opts.overdueH)}。\n${landedLine}` +
     `${lastReportLine(trip, now)}。\n${nowLine(trip, now)}。\n` +
     `查看地圖與時間軸：${url}` +
     (opts.final ? '\n\n這是最後一次自動提醒，之後請直接聯絡本人或查看家人頁。' : '');
@@ -179,14 +219,15 @@ export function whereMessages(trip: Trip, url: string, now = new Date()): Messag
   if (trip.lastCheckinGeo && trip.lastCheckinAt) {
     msgs.push(
       locationMsg(
-        `${trip.title} 最後位置`,
+        `${trip.title} 最後位置${trip.lastCheckinPlace ? ` · ${trip.lastCheckinPlace}` : ''}`,
         fmtBoth(trip.lastCheckinAt.toDate(), trip.travelerTz),
         trip.lastCheckinGeo.latitude,
         trip.lastCheckinGeo.longitude,
       ),
     );
   }
-  msgs.push(textMsg(`${lastReportLine(trip, now)}。\n${status}。\n${nowLine(trip, now)}。\n${url}`));
+  const fl = flightLine(trip, now) ?? nextFlightLine(trip, now);
+  msgs.push(textMsg(`${lastReportLine(trip, now)}。\n${status}。${fl ? `\n${fl}。` : ''}\n${nowLine(trip, now)}。\n${url}`));
   return msgs;
 }
 
@@ -194,7 +235,7 @@ export function whereMessages(trip: Trip, url: string, now = new Date()): Messag
 export function recentListMessages(trip: Trip, recent: RecentItem[], url: string): Message[] {
   const lines = recent.slice(0, 5).map((r) => {
     const at = r.at instanceof Timestamp ? r.at.toDate() : new Date(r.at as unknown as string);
-    return `• ${fmtBoth(at, r.tz)}${r.note ? ` ${r.note}` : ''}`;
+    return `• ${fmtBoth(at, r.tz)} ${r.place ?? tzLabel(r.tz)}${r.note ? ` · ${r.note}` : ''}`;
   });
   const body = lines.length ? lines.join('\n') : '尚無回報';
   return [textMsg(`${trip.title} 最近回報\n${body}\n${url}`)];

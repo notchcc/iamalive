@@ -51,7 +51,7 @@ describe('time', () => {
 
   it('labels and offsets', () => {
     expect(tzLabel('Asia/Tokyo')).toBe('東京');
-    expect(tzLabel('Europe/Lisbon')).toBe('Lisbon');
+    expect(tzLabel('Europe/Oslo')).toBe('Oslo');
     expect(utcOffset(T, 'Asia/Tokyo')).toBe('+09:00');
     expect(utcOffset(T, 'Asia/Kathmandu')).toBe('+05:45');
     expect(utcOffset(T, 'America/Los_Angeles')).toBe('-07:00');

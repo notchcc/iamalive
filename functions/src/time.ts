@@ -35,6 +35,13 @@ const CITY_NAMES: Record<string, string> = {
   'Europe/Madrid': '馬德里',
   'Europe/Amsterdam': '阿姆斯特丹',
   'Europe/Zurich': '蘇黎世',
+  'Europe/Copenhagen': '哥本哈根',
+  'Europe/Stockholm': '斯德哥爾摩',
+  'Europe/Helsinki': '赫爾辛基',
+  'Europe/Lisbon': '里斯本',
+  'Europe/Brussels': '布魯塞爾',
+  'Asia/Doha': '杜哈',
+  'Asia/Riyadh': '利雅德',
   'Europe/Prague': '布拉格',
   'Europe/Vienna': '維也納',
   'Europe/Istanbul': '伊斯坦堡',
@@ -154,4 +161,35 @@ export function fmtHours(h: number): string {
   if (hh === 0) return `${mm} 分鐘`;
   if (mm === 0) return `${hh} 小時`;
   return `${hh} 小時 ${mm} 分`;
+}
+
+/** 某時區在某瞬間的 UTC 偏移（分鐘）。 */
+export function tzOffsetMinutes(date: Date, tz: string): number {
+  const p = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz,
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).formatToParts(date);
+  const g: Record<string, number> = {};
+  for (const x of p) if (x.type !== 'literal') g[x.type] = Number(x.value);
+  const asUtc = Date.UTC(g.year, g.month - 1, g.day, g.hour, g.minute, g.second);
+  return Math.round((asUtc - date.getTime()) / 60000);
+}
+
+/**
+ * 「當地時間字串 + 時區」→ UTC Date。local 形如 2026-09-06T19:35（無偏移）。
+ * 以兩次迭代處理夏令時間邊界。
+ */
+export function zonedToUtc(local: string, tz: string): Date {
+  const m = local.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?$/);
+  if (!m) throw new Error('bad local datetime');
+  const naive = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]), Number(m[6] ?? 0));
+  let guess = naive - tzOffsetMinutes(new Date(naive), tz) * 60000;
+  guess = naive - tzOffsetMinutes(new Date(guess), tz) * 60000;
+  return new Date(guess);
 }

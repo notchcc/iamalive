@@ -5,10 +5,11 @@
 import { randomBytes } from 'node:crypto';
 import tzlookup from 'tz-lookup';
 import { familyUrl } from './config.js';
+import { reverseGeocode } from './geocode.js';
 import { FieldValue, GeoPoint, Timestamp, checkinsCol, db, tripsCol, viewsCol, type TripSnap } from './db.js';
 import { endMessages, offlineMessages, pushGroup, recoveryMessages, startMessages } from './line.js';
 import { HOUR_MS, TAIPEI, isValidTz } from './time.js';
-import type { Checkin, CheckinSource, RecentItem, Trip, View } from './types.js';
+import type { Checkin, CheckinSource, FlightSegment, RecentItem, Trip, View } from './types.js';
 
 export const RECENT_LIMIT = 100;
 
@@ -52,6 +53,7 @@ function recentFromCheckins(docs: Checkin[]): RecentItem[] {
     acc: c.accuracy,
     src: c.source,
     tz: c.tz,
+    place: c.place ?? null,
     note: c.note,
     at: c.createdAt,
   }));
@@ -74,6 +76,7 @@ export function buildView(tripId: string, trip: Trip, label: string, recent: Rec
     nextDeadlineAt: trip.nextDeadlineAt,
     offlineUntil: trip.offlineUntil,
     alerted: trip.alerted,
+    flights: trip.flights ?? [],
     recent,
     updatedAt: Timestamp.now(),
   };
@@ -119,6 +122,7 @@ export async function createTrip(input: CreateTripInput): Promise<{ id: string; 
     travelerTz: TAIPEI,
     lastCheckinAt: null,
     lastCheckinGeo: null,
+    lastCheckinPlace: null,
     nextDeadlineAt: Timestamp.fromDate(new Date(base.getTime() + input.intervalHours * HOUR_MS)),
     offlineUntil: null,
     alerted: false,
@@ -126,6 +130,7 @@ export async function createTrip(input: CreateTripInput): Promise<{ id: string; 
     lastAlertAt: null,
     morningResendDue: false,
     morningResent: false,
+    flights: [],
     groupReadToken,
     readTokens: [groupReadToken],
     createdAt: Timestamp.fromDate(now),
@@ -162,6 +167,7 @@ export async function recordCheckin(snap: TripSnap, input: CheckinInput): Promis
   const trip = snap.data();
   const now = new Date();
   const tz = tzFor(input.lat, input.lng);
+  const place = await reverseGeocode(input.lat, input.lng);
   const hours = input.nextHours ?? trip.intervalHours;
   // 行程開始前的打卡：期限從開始時間起算，避免出發前就觸發警報。
   const base = trip.startAt.toDate() > now ? trip.startAt.toDate() : now;
@@ -172,6 +178,7 @@ export async function recordCheckin(snap: TripSnap, input: CheckinInput): Promis
     accuracy: input.accuracy,
     source: input.source,
     tz,
+    place,
     note: input.note,
     nextHours: input.nextHours,
     createdAt: Timestamp.fromDate(now),
@@ -181,6 +188,7 @@ export async function recordCheckin(snap: TripSnap, input: CheckinInput): Promis
   const patch: Partial<Trip> = {
     lastCheckinAt: checkin.createdAt,
     lastCheckinGeo: checkin.geo,
+    lastCheckinPlace: place,
     travelerTz: tz,
     nextDeadlineAt: Timestamp.fromDate(nextDeadlineAt),
     offlineUntil: null,
@@ -206,7 +214,7 @@ export async function recordCheckin(snap: TripSnap, input: CheckinInput): Promis
   if (recovered) {
     pushed = await pushGroup(
       'recovery',
-      recoveryMessages(updated, input.lat, input.lng, now, tz, input.note, familyUrl(trip.groupReadToken)),
+      recoveryMessages(updated, input.lat, input.lng, now, tz, place, input.note, familyUrl(trip.groupReadToken)),
     );
   }
   return { nextDeadlineAt, tz, pushed, recovered };
@@ -245,6 +253,19 @@ export async function endTrip(snap: TripSnap, reason: string): Promise<{ pushed:
   await batch.commit();
   const pushed = await pushGroup('end', endMessages(updated, reason, familyUrl(trip.groupReadToken)));
   return { pushed };
+}
+
+/** 整批更新航段（依起飛時間排序）。 */
+export async function setFlights(snap: TripSnap, flights: FlightSegment[]): Promise<FlightSegment[]> {
+  const trip = snap.data();
+  const sorted = [...flights].sort((a, b) => a.departAt.toMillis() - b.departAt.toMillis());
+  const patch: Partial<Trip> = { flights: sorted, updatedAt: Timestamp.now() };
+  const updated: Trip = { ...trip, ...patch };
+  const batch = db.batch();
+  batch.update(snap.ref, patch);
+  await syncViews(snap.id, updated, { batch });
+  await batch.commit();
+  return sorted;
 }
 
 export async function addWatcher(snap: TripSnap, label: string): Promise<{ token: string; url: string }> {

@@ -1,4 +1,4 @@
-import type { StatusJson, TripJson, WatcherJson } from './types';
+import type { FlightInput, FlightJson, StatusJson, TripJson, WatcherJson } from './types';
 
 const TOKEN_KEY = 'iamalive.writeToken';
 
@@ -65,6 +65,7 @@ export const api = {
   }) => call<{ ok: true; nextDeadlineAt: string; tz: string; pushed: boolean; recovered: boolean }>('POST', '/checkin', input),
   offline: (id: string, hours: number) =>
     call<{ ok: true; offlineUntil: string; nextDeadlineAt: string; pushed: boolean }>('POST', `/trips/${id}/offline`, { hours }),
+  setFlights: (id: string, flights: FlightInput[]) => call<{ ok: true; flights: FlightJson[] }>('PUT', `/trips/${id}/flights`, { flights }),
   end: (id: string) => call<{ ok: true; pushed: boolean }>('POST', `/trips/${id}/end`),
   watchers: (id: string) => call<WatcherJson[]>('GET', `/trips/${id}/watchers`),
   addWatcher: (id: string, label: string) => call<{ token: string; url: string }>('POST', `/trips/${id}/watchers`, { label }),

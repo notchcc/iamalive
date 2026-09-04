@@ -5,8 +5,8 @@ import L from 'leaflet';
 import { ApiError, api, getToken, setToken } from './api';
 import { renderFamilyPage } from './family';
 import { createMap } from './mapview';
-import { TAIPEI, fmtBoth, fmtDateTime } from './time';
-import type { StatusJson, TripJson, WatcherJson } from './types';
+import { CITY_NAMES, TAIPEI, fmtBoth, fmtDateTime, toLocalInput } from './time';
+import type { FlightInput, FlightJson, StatusJson, TripJson, WatcherJson } from './types';
 
 function esc(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
@@ -149,7 +149,7 @@ export function renderMePage(root: HTMLElement): () => void {
       <section class="card">
         <h2>${esc(t.title)} <span class="muted">每 ${t.intervalHours} 小時</span></h2>
         <div>${fmtDateTime(new Date(t.startAt), TAIPEI)} → ${fmtDateTime(new Date(t.endAt), TAIPEI)}（台北）</div>
-        <div>最後回報：${t.lastCheckinAt ? esc(fmtBoth(new Date(t.lastCheckinAt), t.travelerTz)) : '尚無'}</div>
+        <div>最後回報：${t.lastCheckinAt ? `${t.lastCheckinPlace ? `📍 ${esc(t.lastCheckinPlace)} · ` : ''}${esc(fmtBoth(new Date(t.lastCheckinAt), t.travelerTz))}` : '尚無'}</div>
         <div>下次期限：${esc(fmtBoth(deadline, t.travelerTz))} ${deadline < now ? '<b class="bad-text">已逾時</b>' : ''}</div>
         ${offline && offline > now ? `<div>✈️ 預告離線至 ${esc(fmtBoth(offline, t.travelerTz))}</div>` : ''}
         ${t.alerted ? `<div class="bad-text">⚠️ 已發出逾時警報 ${t.alertCount} 則</div>` : ''}
@@ -167,6 +167,26 @@ export function renderMePage(root: HTMLElement): () => void {
           <div id="pick-map" class="map small"></div>
           <div class="row"><span id="pick-coord" class="muted">點地圖選擇位置</span><button id="pick-submit" disabled>以此位置打卡</button></div>
         </div>
+      </section>
+
+      <section class="card">
+        <h2>航段 <span class="muted">飛行中不警報，落地後 3 小時內回報</span></h2>
+        <ul id="flight-list" class="flight-list"></ul>
+        <form id="add-flight">
+          <div class="grid2">
+            <label>航班號碼<input name="flightNo" maxlength="10" required placeholder="BR61" /></label>
+            <label>起飛城市<input name="fromCity" maxlength="30" required placeholder="台北" /></label>
+            <label>起飛時區<input name="fromTz" list="tzlist" required value="Asia/Taipei" /></label>
+            <label>起飛時間（當地）<input name="departLocal" type="datetime-local" required /></label>
+            <label>降落城市<input name="toCity" maxlength="30" required placeholder="維也納" /></label>
+            <label>降落時區<input name="toTz" list="tzlist" required placeholder="Europe/Vienna" /></label>
+            <label>降落時間（當地）<input name="arriveLocal" type="datetime-local" required /></label>
+          </div>
+          <button type="submit">新增航段</button>
+          <datalist id="tzlist">${Object.entries(CITY_NAMES)
+            .map(([tz, name]) => `<option value="${tz}">${esc(name)}</option>`)
+            .join('')}</datalist>
+        </form>
       </section>
 
       <section class="card">
@@ -232,6 +252,83 @@ export function renderMePage(root: HTMLElement): () => void {
         await load();
       } catch (e) {
         toast(errText(e), 'err');
+      }
+    });
+
+    // ---- 航段 ----
+    let flights: FlightJson[] = t.flights ?? [];
+    const toInput = (f: FlightJson): FlightInput => ({
+      flightNo: f.flightNo,
+      fromCity: f.fromCity,
+      fromTz: f.fromTz,
+      departLocal: toLocalInput(new Date(f.departAt), f.fromTz),
+      toCity: f.toCity,
+      toTz: f.toTz,
+      arriveLocal: toLocalInput(new Date(f.arriveAt), f.toTz),
+    });
+    const flightListEl = root.querySelector<HTMLElement>('#flight-list')!;
+    const renderFlightList = (): void => {
+      flightListEl.innerHTML = flights.length
+        ? flights
+            .map(
+              (f, i) => `<li class="flight"><span class="fno">${esc(f.flightNo)}</span>
+                <span class="leg">${esc(f.fromCity)} ${esc(f.departLocal)} → ${esc(f.toCity)} ${esc(f.arriveLocal)}</span>
+                <button type="button" class="danger" data-del-flight="${i}">刪除</button></li>`,
+            )
+            .join('')
+        : '<li class="muted">尚無航段</li>';
+      flightListEl.querySelectorAll<HTMLButtonElement>('[data-del-flight]').forEach((b) =>
+        b.addEventListener('click', async () => {
+          const idx = Number(b.dataset.delFlight);
+          if (!confirm(`刪除航段 ${flights[idx].flightNo}？`)) return;
+          try {
+            const r = await api.setFlights(t.id, flights.filter((_, i) => i !== idx).map(toInput));
+            flights = r.flights;
+            renderFlightList();
+            toast('已更新航段');
+          } catch (err) {
+            toast(errText(err), 'err');
+          }
+        }),
+      );
+    };
+    renderFlightList();
+
+    const flightForm = root.querySelector<HTMLFormElement>('#add-flight')!;
+    // 選了時區就把空白的城市欄位帶入城市名
+    for (const [tzName, cityName] of [
+      ['fromTz', 'fromCity'],
+      ['toTz', 'toCity'],
+    ] as const) {
+      const tzEl = flightForm.elements.namedItem(tzName) as HTMLInputElement;
+      tzEl.addEventListener('change', () => {
+        const tz = tzEl.value;
+        const cityEl = flightForm.elements.namedItem(cityName) as HTMLInputElement;
+        if (!cityEl.value && CITY_NAMES[tz]) cityEl.value = CITY_NAMES[tz];
+      });
+    }
+    flightForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const fd = new FormData(flightForm);
+      const input: FlightInput = {
+        flightNo: String(fd.get('flightNo')).trim().toUpperCase(),
+        fromCity: String(fd.get('fromCity')).trim(),
+        fromTz: String(fd.get('fromTz')).trim(),
+        departLocal: String(fd.get('departLocal')),
+        toCity: String(fd.get('toCity')).trim(),
+        toTz: String(fd.get('toTz')).trim(),
+        arriveLocal: String(fd.get('arriveLocal')),
+      };
+      try {
+        const r = await api.setFlights(t.id, [...flights.map(toInput), input]);
+        flights = r.flights;
+        renderFlightList();
+        flightForm.reset();
+        (flightForm.elements.namedItem('fromTz') as HTMLInputElement).value = input.toTz; // 下一段通常從上一段的目的地出發
+        (flightForm.elements.namedItem('fromCity') as HTMLInputElement).value = input.toCity;
+        toast('已新增航段');
+      } catch (err) {
+        toast(errText(err), 'err');
       }
     });
 

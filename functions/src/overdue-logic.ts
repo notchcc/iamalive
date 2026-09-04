@@ -14,8 +14,18 @@ import { HOUR_MS, hoursBetween, inQuietHours, isMorningWindow } from './time.js'
 export const REPEAT_H = 3;
 export const MAX_ALERTS = 4;
 export const AUTO_COMPLETE_GRACE_H = 24;
+/** 起飛前多久起算為飛行中（機場報到、關機）。 */
+export const BOARDING_LEAD_H = 2;
+/** 降落後多久內必須回報。 */
+export const LANDING_GRACE_H = 3;
+
+export interface FlightWindow {
+  departAt: Date;
+  arriveAt: Date;
+}
 
 export interface OverdueState {
+  flights?: FlightWindow[];
   startAt: Date;
   endAt: Date;
   nextDeadlineAt: Date;
@@ -38,16 +48,43 @@ export type OverdueDecision =
       patch: Partial<Pick<OverdueState, 'alerted' | 'alertCount' | 'lastAlertAt' | 'morningResendDue' | 'morningResent'>>;
     };
 
+/** 目前是否在飛行中（起飛前 BOARDING_LEAD_H 到降落）。 */
+export function currentFlight<T extends FlightWindow>(flights: T[] | undefined, now: Date): T | null {
+  for (const f of flights ?? []) {
+    if (f.departAt.getTime() - BOARDING_LEAD_H * HOUR_MS <= now.getTime() && now.getTime() <= f.arriveAt.getTime()) return f;
+  }
+  return null;
+}
+
+/**
+ * 把期限依航段順延：若期限落在某航段的飛行窗內，改為該航段降落 + LANDING_GRACE_H；
+ * 連續套用以處理轉機。
+ */
+export function effectiveDeadline(deadline: Date, flights: FlightWindow[] | undefined): Date {
+  let d = deadline;
+  const sorted = [...(flights ?? [])].sort((a, b) => a.departAt.getTime() - b.departAt.getTime());
+  for (const f of sorted) {
+    const winStart = f.departAt.getTime() - BOARDING_LEAD_H * HOUR_MS;
+    if (d.getTime() >= winStart && d.getTime() <= f.arriveAt.getTime() + LANDING_GRACE_H * HOUR_MS) {
+      const moved = new Date(f.arriveAt.getTime() + LANDING_GRACE_H * HOUR_MS);
+      if (moved.getTime() > d.getTime()) d = moved;
+    }
+  }
+  return d;
+}
+
 export function decideOverdue(s: OverdueState, now: Date): OverdueDecision {
   if (s.endAt.getTime() + AUTO_COMPLETE_GRACE_H * HOUR_MS < now.getTime()) {
     return { action: 'complete' };
   }
   // 行程尚未開始：不警報（開始前的打卡只是測試或提早回報）。
   if (s.startAt.getTime() > now.getTime()) return { action: 'none' };
-  if (s.nextDeadlineAt.getTime() > now.getTime()) return { action: 'none' };
+  const deadline = effectiveDeadline(s.nextDeadlineAt, s.flights);
+  if (deadline.getTime() > now.getTime()) return { action: 'none' };
   if (s.offlineUntil && s.offlineUntil.getTime() > now.getTime()) return { action: 'none' };
+  if (currentFlight(s.flights, now)) return { action: 'none' };
 
-  const overdueH = hoursBetween(s.nextDeadlineAt, now);
+  const overdueH = hoursBetween(deadline, now);
 
   // 早晨補發優先：上一則落在安靜時段、現在已進入白天、本事件尚未補發。
   if (s.alerted && s.morningResendDue && !s.morningResent && isMorningWindow(now)) {

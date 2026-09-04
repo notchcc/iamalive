@@ -2,7 +2,7 @@
 
 | 項目 | 內容 |
 |---|---|
-| 文件版本 | v0.4 |
+| 文件版本 | v0.5 |
 | 日期 | 2026-09-04 |
 | 狀態 | 設計定稿，待決事項已全部定案，可進入開發 |
 
@@ -14,6 +14,7 @@
 | v0.2 | 個人用、純 PWA、Web Push 通知、capability token |
 | v0.3 | 通知改為官方帳號推播到家人 LINE 群組；移除 PWA 推播層；打卡入口以 iOS 捷徑為主 |
 | v0.4 | 待決事項定案：警報參數與安靜時段補發（台北時間）、打卡靜默只推狀態變化、位置訊息附家人頁連結、保留家人頁；新增旅人時區與台北雙時鐘 |
+| v0.5 | 新增**航段**（多筆，當地時間輸入），飛行中不警報、期限順延至降落後 3 小時；打卡紀錄加入**反向地理編碼城市**與經緯度；行程開始前不警報；webhook 未綁定時自動綁定首個群組 |
 
 ---
 
@@ -136,7 +137,9 @@
 | `travelerTz` | string | 旅人目前時區（IANA），建立時預設 `Asia/Taipei`，每次打卡以座標更新 |
 | `lastCheckinAt` | timestamp \| null | |
 | `lastCheckinGeo` | geopoint \| null | |
-| `nextDeadlineAt` | timestamp | **下一個期限**，建立時 = `max(startAt, now) + intervalHours`；每次打卡重算 |
+| `lastCheckinPlace` | string \| null | 最後位置「城市, 國家」（反向地理編碼） |
+| `nextDeadlineAt` | timestamp | **下一個期限**，建立時 = `max(startAt, now) + intervalHours`；每次打卡 = `max(now, startAt) + hours` |
+| `flights` | array\<FlightSegment\> | 航段，依 `departAt` 排序，上限 20（見 4.2.1） |
 | `offlineUntil` | timestamp \| null | 預告離線至此時間，期間不警報 |
 | `alerted` | boolean | 本期限內是否已發過警報，打卡後歸零 |
 | `alertCount` | number | 本期限內已發的一般警報數（不含早晨補發），打卡後歸零 |
@@ -146,6 +149,20 @@
 | `readTokens` | array\<string\> | 家人頁 token 清單 |
 | `createdAt` / `updatedAt` | timestamp | |
 
+#### 4.2.1 `FlightSegment`
+
+| 欄位 | 型別 | 說明 |
+|---|---|---|
+| `flightNo` | string | 航班號碼，大寫 |
+| `fromCity` / `toCity` | string | 起降城市（顯示用） |
+| `fromTz` / `toTz` | string | 起降城市 IANA 時區 |
+| `departAt` / `arriveAt` | timestamp | 起降時間（UTC）。API 以「當地時間字串 + 時區」輸入，伺服器以 `zonedToUtc` 轉換（含夏令時間） |
+
+航段對警報的影響（`overdue-logic.ts`）：
+- **飛行窗** = 起飛前 `BOARDING_LEAD_H`（2 小時）到降落。窗內不警報。
+- **期限順延**：若 `nextDeadlineAt` 落在某航段的〔飛行窗起點, 降落 + `LANDING_GRACE_H`（3 小時）〕內，有效期限改為「降落 + 3 小時」；依起飛時間排序連續套用，轉機自然銜接。
+- 落地後 3 小時內未打卡才警報，警報文案附「BR61 預計已於 台北 HH:mm（當地 HH:mm）降落 維也納」。
+
 ### 4.3 `trips/{tripId}/checkins/{checkinId}`（僅 Functions 寫入）
 
 | 欄位 | 型別 | 說明 |
@@ -154,6 +171,7 @@
 | `accuracy` | number \| null | 公尺；捷徑與 LINE 位置訊息為 null |
 | `source` | string | `shortcut` / `line` / `web-gps` / `manual` |
 | `tz` | string | 該座標的 IANA 時區，伺服器以 `tz-lookup` 推算 |
+| `place` | string \| null | 「城市, 國家」，打卡時以 OSM Nominatim 反向地理編碼（4 秒逾時，失敗為 null，顯示時退回時區城市名） |
 | `note` | string | ≤ 200 字，可空 |
 | `nextHours` | number \| null | 本次預告「下次幾小時後回報」 |
 | `createdAt` | timestamp | 伺服器時間 |
@@ -169,7 +187,8 @@
 | `travelerTz` | string | 複製自 trip，家人頁雙時鐘用 |
 | `lastCheckinAt` / `nextDeadlineAt` / `offlineUntil` | timestamp \| null | 複製自 trip |
 | `alerted` | boolean | 複製自 trip，家人頁頂部狀態用 |
-| `recent` | array\<map\> | 最近 100 筆 `{lat, lng, acc, src, tz, note, at}` |
+| `flights` | array\<FlightSegment\> | 複製自 trip，家人頁航段區塊與飛行中狀態用 |
+| `recent` | array\<map\> | 最近 100 筆 `{lat, lng, acc, src, tz, place, note, at}` |
 | `updatedAt` | timestamp | |
 
 每次打卡、預告離線、警報狀態變化、結案，Function 在同一個 batch 內更新 `trips` 與該行程所有 `views/*`。
@@ -210,6 +229,8 @@ service cloud.firestore {
 | POST | `/api/trips` | 建立行程 | 寫 `trips`；推「行程開始」 |
 | POST | `/api/trips/:id/end` | 結束行程 | `status = completed`，同步 views，推「行程結束」 |
 | POST | `/api/trips/:id/offline` | 預告離線 | `{ hours }` → `offlineUntil`、`nextDeadlineAt = offlineUntil + interval`，推「將離線至 T」 |
+| PUT | `/api/trips/:id/flights` | 整批更新航段 | `{ flights: [{ flightNo, fromCity, fromTz, departLocal, toCity, toTz, arriveLocal }] }`，`*Local` 為 `YYYY-MM-DDTHH:mm` 當地時間；驗證時區有效、降落晚於起飛、單段 ≤ 30 小時 |
+| POST | `/api/line/bind` | 手動綁定群組 | `{ groupId }` |
 | POST | `/api/trips/:id/watchers` | 新增家人頁連結 | 產生 readToken，建立 `views/{token}`，回傳連結 |
 | DELETE | `/api/trips/:id/watchers/:token` | 撤銷連結 | 刪 view |
 | GET | `/api/trips/active` | 取目前 active 行程 | 捷徑與 `/me` 用 |
@@ -233,6 +254,7 @@ Response: { ok: true, nextDeadlineAt, tz, pushed: boolean }
 - 驗證 `x-line-signature`（HMAC-SHA256，Channel Secret），失敗回 401。
 - 一律先回 200，再非同步處理事件。
 - 只處理 `source.type == 'group'` 且 `groupId` 與 `config/line` 相符的事件（`join` 除外）。
+- **尚未綁定任何群組時，第一個送來事件的群組即自動綁定**（涵蓋邀請 bot 時 webhook 尚未開啟、`join` 事件遺失的情況），並把來訊者 userId 寫入 log 供設定 `TRAVELER_LINE_UID`。
 
 | 事件 | 處理 |
 |---|---|
@@ -315,6 +337,7 @@ reply 免費，不計額度。非旅行者傳的位置訊息忽略。
 - 「用瀏覽器定位打卡」：`getCurrentPosition({ enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 })`，`source = web-gps`，此路徑有精度值。
 - 「地圖選點打卡」：定位失敗時的手動路徑，`source = manual`。
 - 建立 / 結束行程、預告離線、新增 / 撤銷家人連結、顯示群組綁定狀態與本月額度。
+- **航段**卡片：列表與刪除；新增表單含航班號碼、起飛城市 / 時區 / 當地時間、降落城市 / 時區 / 當地時間；時區欄為 datalist（常用城市中文對照），選時區自動帶入城市名，新增後下一段的起飛欄自動帶入上一段目的地。
 - 內嵌與家人頁相同的地圖與時間軸元件（自用回顧）。
 
 ---
@@ -331,6 +354,9 @@ reply 免費，不計額度。非旅行者傳的位置訊息忽略。
 | 安靜時段 | **台北時間 23:00–07:00** | 期間警報照常發送，但會標記待補發 |
 | 早晨補發 | **台北時間 08:00** 後第一次掃描 | 每次事件最多 1 次，不計入 `MAX_ALERTS` |
 | 自動結案 | `endAt + 24h` | 避免忘記結案後永久警報 |
+| 行程開始前 | 不警報 | 出發前的測試打卡不會觸發 |
+| `BOARDING_LEAD_H` | 2 | 起飛前多久起算飛行中 |
+| `LANDING_GRACE_H` | 3 | 降落後多久內須回報 |
 
 每次逾時事件最多 5 則（4 則一般 + 1 則補發）。
 
@@ -426,6 +452,12 @@ export const checkOverdue = onSchedule(
 └──────────────────────────────────────┘
 ```
 
+### 8.1.1 航段與地點
+
+- 狀態卡在飛行中改為藍色「✈️ 飛行中 BR61」，副標「台北 → 維也納，預計 台北 MM/DD HH:mm（維也納 HH:mm）降落，落地後 3 小時內回報」；非飛行中且有下一段時顯示「下一段 … 起飛」。
+- 狀態卡下方「航段」區塊列出所有航段（各地當地時間）與狀態：已降落 / 飛行中 / 未起飛。
+- 最後回報行與時間軸每張卡片顯示 **📍 城市, 國家**（`place`，查不到退回時區城市名）與 **經緯度**（小數 5 位，連到 Google Maps）。地圖 popup 同。
+
 ### 8.2 雙時鐘規則
 
 - 左側固定 `Asia/Taipei`；右側為 `views.travelerTz`，標籤顯示時區的城市名（IANA 最後一段，`Asia/Tokyo` → 「東京」，以對照表翻譯，無對照則顯示原字串）與 UTC 偏移。
@@ -462,6 +494,7 @@ export const checkOverdue = onSchedule(
 
 - 群組為單一收件對象，一次 push 不論人數只計 1 則。
 - 所有訊息內時間格式：「台北 MM/DD HH:mm（當地 HH:mm）」。
+- 「在哪」回覆含最後位置城市、飛行中或下一段航班；「行程」回覆每筆含城市；逾時警報含最近 24 小時內預計已降落的航段；「行程開始」列出前 6 段航段。
 
 ### 9.2 額度
 
@@ -583,6 +616,10 @@ firebase functions:secrets:set TRAVELER_LINE_UID
 - [ ] `離線 16` 指令生效，期間排程不警報
 - [ ] 把 bot 移出群組，`/me` 顯示未綁定；重新邀請後自動恢復
 - [ ] 撤銷家人 token 後其頁面顯示連結已失效
+- [ ] 新增航段 BR61（台北 12:00 → 維也納 18:00 當地），回傳 UTC 正確（04:00Z / 16:00Z）
+- [ ] 期限落在飛行窗內時排程不警報；降落 3.5 小時後警報，文案含「預計已於 … 降落」
+- [ ] 家人頁飛行中顯示藍色狀態卡與航段列表
+- [ ] 時間軸卡片顯示城市、經緯度與地圖連結；Nominatim 失敗時退回時區城市名
 
 ---
 
@@ -595,3 +632,5 @@ firebase functions:secrets:set TRAVELER_LINE_UID
 | 3 | 訊息格式 | 位置訊息 + 帶家人頁連結的文字，不用 Flex |
 | 4 | 家人頁 | **保留**，含雙時鐘、地圖、時間軸 |
 | 5 | 時區顯示 | 家人頁與所有訊息同時顯示台北與旅人當地時間；旅人時區由座標推算 |
+| 6 | 航段 | 多筆、當地時間輸入；飛行中不警報，期限順延至降落後 3 小時 |
+| 7 | 地點顯示 | 打卡時反向地理編碼存城市；卡片顯示城市 + 經緯度 + 地圖連結 |

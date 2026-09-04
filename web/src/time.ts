@@ -1,7 +1,7 @@
 /** 前端時間格式化：台北為主、旅人當地為輔。與 functions/src/time.ts 對齊。 */
 export const TAIPEI = 'Asia/Taipei';
 
-const CITY_NAMES: Record<string, string> = {
+export const CITY_NAMES: Record<string, string> = {
   'Asia/Taipei': '台北',
   'Asia/Tokyo': '東京',
   'Asia/Seoul': '首爾',
@@ -24,6 +24,13 @@ const CITY_NAMES: Record<string, string> = {
   'Europe/Madrid': '馬德里',
   'Europe/Amsterdam': '阿姆斯特丹',
   'Europe/Zurich': '蘇黎世',
+  'Europe/Copenhagen': '哥本哈根',
+  'Europe/Stockholm': '斯德哥爾摩',
+  'Europe/Helsinki': '赫爾辛基',
+  'Europe/Lisbon': '里斯本',
+  'Europe/Brussels': '布魯塞爾',
+  'Asia/Doha': '杜哈',
+  'Asia/Riyadh': '利雅德',
   'Europe/Prague': '布拉格',
   'Europe/Vienna': '維也納',
   'Europe/Istanbul': '伊斯坦堡',
@@ -121,4 +128,11 @@ export function fmtHours(h: number): string {
   if (hh === 0) return `${mm} 分鐘`;
   if (mm === 0) return `${hh} 小時`;
   return `${hh} 小時 ${mm} 分`;
+}
+
+/** Date → 該時區的 `YYYY-MM-DDTHH:mm`（datetime-local 輸入值）。 */
+export function toLocalInput(date: Date, tz: string): string {
+  const p: Record<string, string> = {};
+  for (const x of new Intl.DateTimeFormat('en-US', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).formatToParts(date)) p[x.type] = x.value;
+  return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`;
 }

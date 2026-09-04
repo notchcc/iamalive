@@ -11,6 +11,7 @@ import type { Trip } from './types.js';
 
 function toState(t: Trip): OverdueState {
   return {
+    flights: (t.flights ?? []).map((f) => ({ departAt: f.departAt.toDate(), arriveAt: f.arriveAt.toDate() })),
     startAt: t.startAt.toDate(),
     endAt: t.endAt.toDate(),
     nextDeadlineAt: t.nextDeadlineAt.toDate(),

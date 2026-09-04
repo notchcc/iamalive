@@ -86,11 +86,25 @@ function accuracyText(it: RecentItem): string {
   return `±${Math.round(it.acc)} m`;
 }
 
+export function placeText(it: RecentItem): string {
+  return it.place || tzLabel(it.tz);
+}
+
+export function coordText(it: RecentItem): string {
+  return `${it.lat.toFixed(5)}, ${it.lng.toFixed(5)}`;
+}
+
+export function mapsUrl(it: RecentItem): string {
+  return `https://www.google.com/maps?q=${it.lat.toFixed(6)},${it.lng.toFixed(6)}`;
+}
+
 function popupHtml(it: RecentItem): string {
   const at = it.at.toDate();
   return `<b>${esc(fmtDateTime(at, TAIPEI))} 台北</b>${
     sameAsTaipei(at, it.tz) ? '' : `<br>${esc(tzLabel(it.tz))} ${esc(fmtTime(at, it.tz))}`
-  }${it.note ? `<br>${esc(it.note)}` : ''}<br><small>${SOURCE_LABEL[it.src]} · ${accuracyText(it)}</small>`;
+  }<br>📍 ${esc(placeText(it))}<br><a href="${mapsUrl(it)}" target="_blank" rel="noopener">${esc(coordText(it))}</a>${
+    it.note ? `<br>${esc(it.note)}` : ''
+  }<br><small>${SOURCE_LABEL[it.src]} · ${accuracyText(it)}</small>`;
 }
 
 export function renderTimeline(el: HTMLElement, items: RecentItem[], now = new Date()): void {
@@ -104,6 +118,8 @@ export function renderTimeline(el: HTMLElement, items: RecentItem[], now = new D
       const local = sameAsTaipei(at, it.tz) ? '' : `<span class="local">${esc(tzLabel(it.tz))} ${esc(fmtTime(at, it.tz))}</span>`;
       return `<li class="tl-item src-${it.src}">
         <div class="tl-time"><b>${esc(fmtDateTime(at, TAIPEI))}</b> ${local}<span class="ago">${esc(fmtAgo(at, now))}</span></div>
+        <div class="tl-place">📍 <b>${esc(placeText(it))}</b>
+          <a class="coord" href="${mapsUrl(it)}" target="_blank" rel="noopener">${esc(coordText(it))}</a></div>
         <div class="tl-body">${it.note ? esc(it.note) : '<span class="muted">已報平安</span>'}</div>
         <div class="tl-meta">${SOURCE_LABEL[it.src]} · ${esc(accuracyText(it))}</div>
       </li>`;
