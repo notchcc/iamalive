@@ -12,7 +12,7 @@ import { Timestamp, getFirestore } from 'firebase-admin/firestore';
 const here = dirname(fileURLToPath(import.meta.url));
 const fnDir = resolve(here, '..');
 
-// 讀 .secret.local 取得 WRITE_TOKEN（與 emulator 內 functions 看到的一致）
+// 讀 .secret.local（與 emulator 內 functions 看到的一致）
 const secrets = Object.fromEntries(
   readFileSync(resolve(fnDir, '.secret.local'), 'utf8')
     .split('\n')
@@ -98,7 +98,7 @@ async function main() {
   log('functions emulator ready');
 
   // ---- 認證：未登入 401 → dev-login → 金鑰 → 舊 token 對應 ----
-  const A_UID = secrets.TRAVELER_LINE_UID; // 舊 WRITE_TOKEN 對應到這位
+  const A_UID = 'Ua1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1';
   const B_UID = 'Ub2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2';
   let r = await call('GET', '/status', undefined, null);
   assert.equal(r.status, 401, 'no auth must be 401');
@@ -131,11 +131,9 @@ async function main() {
   r = await call('GET', '/status');
   assert.equal(r.json.user.kind, 'apikey');
   assert.equal(r.json.user.uid, A_UID);
-  r = await call('GET', '/status', undefined, { legacy: secrets.WRITE_TOKEN });
-  assert.equal(r.status, 200);
-  assert.equal(r.json.user.uid, A_UID, 'legacy write token maps to traveler uid');
-  assert.equal(r.json.user.kind, 'legacy');
-  log('api key + legacy token ok');
+  r = await call('GET', '/status', undefined, { legacy: 'anything' });
+  assert.equal(r.status, 401, 'old X-Write-Token no longer accepted');
+  log('api key ok');
 
   // 建立行程
   const now = new Date();

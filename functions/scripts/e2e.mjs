@@ -27,10 +27,8 @@ function ensureKeys(file, defaults) {
   }
 }
 ensureKeys(resolve(fnDir, '.secret.local'), {
-  WRITE_TOKEN: 'e2e-write-token',
   LINE_CHANNEL_SECRET: 'e2e-channel-secret',
   LINE_CHANNEL_ACCESS_TOKEN: 'e2e-access-token',
-  TRAVELER_LINE_UID: 'Ue2e0000000000000000000000000000',
   LINE_LOGIN_CHANNEL_SECRET: 'e2e-login-secret',
   SESSION_SECRET: 'e2e-session-secret-0123456789abcdef',
 });

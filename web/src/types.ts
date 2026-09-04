@@ -86,7 +86,7 @@ export interface TripJson {
 
 export interface UserJson {
   uid: string;
-  kind: 'session' | 'apikey' | 'legacy';
+  kind: 'session' | 'apikey';
   displayName: string | null;
   pictureUrl: string | null;
 }

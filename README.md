@@ -42,9 +42,6 @@ firebase functions:secrets:set LINE_CHANNEL_SECRET          # Messaging API
 firebase functions:secrets:set LINE_CHANNEL_ACCESS_TOKEN    # Messaging API 長效 token
 firebase functions:secrets:set LINE_LOGIN_CHANNEL_SECRET    # LINE Login
 openssl rand -base64 48 | firebase functions:secrets:set SESSION_SECRET --data-file -   # session 簽章金鑰
-# 過渡期（可略）：舊捷徑仍用 X-Write-Token 時，設 WRITE_TOKEN 與 TRAVELER_LINE_UID（對應的使用者）
-firebase functions:secrets:set WRITE_TOKEN
-firebase functions:secrets:set TRAVELER_LINE_UID
 
 cp functions/.env.example functions/.env             # 填 PUBLIC_BASE_URL、PHOTO_BUCKET、LINE_LOGIN_CHANNEL_ID
 cp web/.env.example web/.env                         # 填 Firebase Web 設定與 MapTiler key

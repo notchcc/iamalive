@@ -4,19 +4,11 @@
  * - 人：LINE Login 授權碼流程 → 驗 ID token → 簽發 30 天 session JWT，放在 `__session` cookie
  *   （Firebase Hosting 只轉送這個名稱的 cookie 給 Functions）。
  * - 機器：`X-Api-Key: ak_...`，只存 SHA-256 雜湊，可個別撤銷。
- * - 過渡：舊的 `X-Write-Token` 若仍設定，視為 TRAVELER_LINE_UID 這位使用者的金鑰。
  */
 import { createHmac, randomBytes, timingSafeEqual, createHash } from 'node:crypto';
 import type { NextFunction, Request, Response } from 'express';
 import { logger } from 'firebase-functions/v2';
-import {
-  LINE_LOGIN_CHANNEL_ID,
-  LINE_LOGIN_CHANNEL_SECRET,
-  PUBLIC_BASE_URL,
-  SESSION_SECRET,
-  TRAVELER_LINE_UID,
-  WRITE_TOKEN,
-} from './config.js';
+import { LINE_LOGIN_CHANNEL_ID, LINE_LOGIN_CHANNEL_SECRET, PUBLIC_BASE_URL, SESSION_SECRET } from './config.js';
 import { FieldValue, Timestamp, apiKeysCol, usersCol } from './db.js';
 import { HttpError } from './errors.js';
 import type { ApiKey } from './types.js';
@@ -25,7 +17,7 @@ export const SESSION_COOKIE = '__session';
 export const SESSION_DAYS = 30;
 const STATE_TTL_MS = 10 * 60_000;
 
-export type AuthKind = 'session' | 'apikey' | 'legacy';
+export type AuthKind = 'session' | 'apikey';
 export interface AuthInfo {
   uid: string;
   kind: AuthKind;
@@ -246,13 +238,6 @@ export async function resolveAuth(req: Request): Promise<AuthInfo | null> {
   if (apiKey) {
     const uid = await resolveApiKey(apiKey);
     if (uid) return { uid, kind: 'apikey' };
-  }
-  // 過渡期：舊寫入 token → 旅行者本人
-  const legacy = req.header('x-write-token') ?? '';
-  if (legacy) {
-    const expected = secretOr(WRITE_TOKEN, '');
-    const uid = secretOr(TRAVELER_LINE_UID, '');
-    if (expected && uid && safeEq(legacy, expected)) return { uid, kind: 'legacy' };
   }
   const cookie = readCookie(req, SESSION_COOKIE);
   if (cookie) {

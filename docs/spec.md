@@ -112,7 +112,6 @@
 | 家人（LINE） | 群組成員身分 | 收推播、「在哪」「行程」 | 無需任何設定 |
 | 官方帳號 | `LINE_CHANNEL_SECRET`、`LINE_CHANNEL_ACCESS_TOKEN` | 驗證 webhook、push/reply | Secret |
 | LINE Login | `LINE_LOGIN_CHANNEL_ID`（env）、`LINE_LOGIN_CHANNEL_SECRET`、`SESSION_SECRET` | 授權碼交換、驗 ID token、簽 session | Secret |
-| 過渡 | `WRITE_TOKEN` + `TRAVELER_LINE_UID` | 舊 `X-Write-Token` 視為該使用者的金鑰 | 捷徑全部換金鑰後移除 |
 
 登入流程：`GET /api/auth/line/start`（簽章 `state`，10 分鐘）→ LINE 授權 → `GET /api/auth/line/callback` 以 channel secret 換 token、呼叫 LINE verify 端點驗 ID token 與 `aud` → upsert `users/{userId}` → 設 cookie → 導回 `/me`。cookie 身分的變更請求需同站（`Sec-Fetch-Site` / `Origin` 檢查）。**LINE Login channel 與 Messaging API channel 必須在同一個 Provider**，userId 才一致。
 
