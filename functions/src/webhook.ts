@@ -64,9 +64,129 @@ export async function bindGroupWithCode(gid: string, code: string, userId: strin
   return 'ok';
 }
 
+const HELP_DM =
+  '直接傳送「位置」給我就會記錄一次平安回報。\n' +
+  '文字指令：\n' +
+  '・離線 16 → 預告接下來 16 小時不會回報\n' +
+  '・結束 → 結束目前行程\n' +
+  '・備註 已到飯店 → 補到最後一筆打卡\n' +
+  '・在哪 / 行程 → 查看最後位置與最近回報\n' +
+  '行程的建立與家人群組綁定請到管理頁。';
+
+/** 擁有者的位置訊息 → 打卡並回覆。 */
+async function handleOwnerLocation(ownerUid: string, mev: webhook.MessageEvent): Promise<void> {
+  const loc = mev.message as webhook.LocationMessageContent;
+  const replyToken = mev.replyToken;
+  const trip = await getActiveTrip(ownerUid);
+  if (!trip) {
+    if (replyToken) await reply(replyToken, [textMsg('目前沒有進行中的行程，未記錄。請先到管理頁建立行程。')]);
+    return;
+  }
+  const note = [loc.title, loc.address].filter(Boolean).join(' ').slice(0, 200);
+  const r = await recordCheckin(trip, {
+    lat: loc.latitude,
+    lng: loc.longitude,
+    accuracy: null,
+    source: 'line',
+    note,
+    nextHours: null,
+    clientAt: new Date(mev.timestamp),
+  });
+  if (replyToken) {
+    const now = new Date();
+    await reply(replyToken, [
+      textMsg(`已記錄 · ${fmtBoth(now, r.tz)}\n下次期限 ${fmtBoth(r.nextDeadlineAt, r.tz)}${r.recovered ? '\n（已解除逾時警報）' : ''}`),
+    ]);
+  }
+}
+
+/** 擁有者文字指令。回傳 true 表示已處理。 */
+async function handleOwnerCommand(ownerUid: string, text: string, replyToken: string): Promise<boolean> {
+  const offline = text.match(/^離線\s*(\d{1,3})$/);
+  if (offline) {
+    const hours = Number(offline[1]);
+    if (hours < 1 || hours > 168) {
+      await reply(replyToken, [textMsg('離線時數需在 1–168 之間。')]);
+      return true;
+    }
+    const trip = await getActiveTrip(ownerUid);
+    if (!trip) {
+      await reply(replyToken, [textMsg('目前沒有進行中的行程。')]);
+      return true;
+    }
+    const out = await setOffline(trip, hours);
+    await reply(replyToken, [textMsg(`已設定離線至 ${fmtBoth(out.offlineUntil, trip.data().travelerTz)}，期間不會警報。`)]);
+    return true;
+  }
+  if (text === '結束') {
+    const trip = await getActiveTrip(ownerUid);
+    if (!trip) {
+      await reply(replyToken, [textMsg('目前沒有進行中的行程。')]);
+      return true;
+    }
+    await endTrip(trip, '旅行者以 LINE 指令結案');
+    await reply(replyToken, [textMsg('行程已結束。')]);
+    return true;
+  }
+  const noteCmd = text.match(/^備註\s+(.+)$/s);
+  if (noteCmd) {
+    const trip = await getActiveTrip(ownerUid);
+    if (!trip) {
+      await reply(replyToken, [textMsg('目前沒有進行中的行程。')]);
+      return true;
+    }
+    const ok = await updateLastNote(trip, noteCmd[1].slice(0, 200));
+    await reply(replyToken, [textMsg(ok ? '已補上備註。' : '尚無打卡可補備註。')]);
+    return true;
+  }
+  return false;
+}
+
+/** 任何人都能用的查詢。回傳 true 表示已處理。 */
+async function handleQuery(ownerUid: string, text: string, replyToken: string): Promise<boolean> {
+  if (/在哪|平安/.test(text)) {
+    const trip = await getActiveTrip(ownerUid);
+    if (!trip) await reply(replyToken, [textMsg('目前沒有進行中的行程。')]);
+    else await reply(replyToken, whereMessages(trip.data(), familyUrl(trip.data().groupReadToken)));
+    return true;
+  }
+  if (/行程/.test(text)) {
+    const trip = await getActiveTrip(ownerUid);
+    if (!trip) await reply(replyToken, [textMsg('目前沒有進行中的行程。')]);
+    else await reply(replyToken, recentListMessages(trip.data(), await recentForTrip(trip.id, 5), familyUrl(trip.data().groupReadToken)));
+    return true;
+  }
+  return false;
+}
+
+/** 1 對 1 聊天：傳訊者本人就是擁有者。 */
+async function handleDirectEvent(ev: Event, userId: string): Promise<void> {
+  if (ev.type === 'follow') {
+    const rt = (ev as webhook.FollowEvent).replyToken;
+    if (rt) await reply(rt, [textMsg(`感謝加入 iamalive。\n${HELP_DM}`)]);
+    return;
+  }
+  if (ev.type !== 'message') return;
+  const mev = ev as webhook.MessageEvent;
+  if (mev.message.type === 'location') {
+    await handleOwnerLocation(userId, mev);
+    return;
+  }
+  if (mev.message.type !== 'text' || !mev.replyToken) return;
+  const text = (mev.message as webhook.TextMessageContent).text.trim();
+  if (await handleOwnerCommand(userId, text, mev.replyToken)) return;
+  if (await handleQuery(userId, text, mev.replyToken)) return;
+  await reply(mev.replyToken, [textMsg(HELP_DM)]);
+}
+
 async function handleEvent(ev: Event): Promise<void> {
   const gid = groupIdOf(ev);
-  if (!gid) return; // 只服務群組
+  if (!gid) {
+    const src = ev.source as webhook.Source | undefined;
+    const uid = userIdOf(ev);
+    if (src?.type === 'user' && uid) await handleDirectEvent(ev, uid);
+    return;
+  }
 
   if (ev.type === 'join') {
     const rt = (ev as webhook.JoinEvent).replyToken;
@@ -128,71 +248,12 @@ async function handleEvent(ev: Event): Promise<void> {
 
   if (mev.message.type === 'location') {
     if (!isOwner) return;
-    const loc = mev.message as webhook.LocationMessageContent;
-    const trip = await getActiveTrip(ownerUid);
-    if (!trip) {
-      if (replyToken) await reply(replyToken, [textMsg('目前沒有進行中的行程，未記錄。')]);
-      return;
-    }
-    const note = [loc.title, loc.address].filter(Boolean).join(' ').slice(0, 200);
-    const r = await recordCheckin(trip, {
-      lat: loc.latitude,
-      lng: loc.longitude,
-      accuracy: null,
-      source: 'line',
-      note,
-      nextHours: null,
-      clientAt: new Date(mev.timestamp),
-    });
-    if (replyToken) {
-      const now = new Date();
-      await reply(replyToken, [
-        textMsg(`已記錄 · ${fmtBoth(now, r.tz)}\n下次期限 ${fmtBoth(r.nextDeadlineAt, r.tz)}${r.recovered ? '\n（已解除逾時警報）' : ''}`),
-      ]);
-    }
+    await handleOwnerLocation(ownerUid, mev);
     return;
   }
 
   if (mev.message.type !== 'text' || !replyToken) return;
   const text = (mev.message as webhook.TextMessageContent).text.trim();
-
-  if (isOwner) {
-    const offline = text.match(/^離線\s*(\d{1,3})$/);
-    if (offline) {
-      const hours = Number(offline[1]);
-      if (hours < 1 || hours > 168) return void (await reply(replyToken, [textMsg('離線時數需在 1–168 之間。')]));
-      const trip = await getActiveTrip(ownerUid);
-      if (!trip) return void (await reply(replyToken, [textMsg('目前沒有進行中的行程。')]));
-      const out = await setOffline(trip, hours);
-      await reply(replyToken, [textMsg(`已設定離線至 ${fmtBoth(out.offlineUntil, trip.data().travelerTz)}，期間不會警報。`)]);
-      return;
-    }
-    if (text === '結束') {
-      const trip = await getActiveTrip(ownerUid);
-      if (!trip) return void (await reply(replyToken, [textMsg('目前沒有進行中的行程。')]));
-      await endTrip(trip, '旅行者以 LINE 指令結案');
-      return;
-    }
-    const noteCmd = text.match(/^備註\s+(.+)$/s);
-    if (noteCmd) {
-      const trip = await getActiveTrip(ownerUid);
-      if (!trip) return void (await reply(replyToken, [textMsg('目前沒有進行中的行程。')]));
-      const ok = await updateLastNote(trip, noteCmd[1].slice(0, 200));
-      await reply(replyToken, [textMsg(ok ? '已補上備註。' : '尚無打卡可補備註。')]);
-      return;
-    }
-  }
-
-  if (/在哪|平安/.test(text)) {
-    const trip = await getActiveTrip(ownerUid);
-    if (!trip) return void (await reply(replyToken, [textMsg('目前沒有進行中的行程。')]));
-    await reply(replyToken, whereMessages(trip.data(), familyUrl(trip.data().groupReadToken)));
-    return;
-  }
-  if (/行程/.test(text)) {
-    const trip = await getActiveTrip(ownerUid);
-    if (!trip) return void (await reply(replyToken, [textMsg('目前沒有進行中的行程。')]));
-    const recent = await recentForTrip(trip.id, 5);
-    await reply(replyToken, recentListMessages(trip.data(), recent, familyUrl(trip.data().groupReadToken)));
-  }
+  if (isOwner && (await handleOwnerCommand(ownerUid, text, replyToken))) return;
+  await handleQuery(ownerUid, text, replyToken);
 }

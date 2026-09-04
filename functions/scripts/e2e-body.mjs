@@ -318,6 +318,19 @@ async function main() {
   assert.equal(view.recent.length, beforeN + 1);
   assert.equal(view.recent[0].src, 'line');
   assert.equal(view.recent[0].tz, 'Europe/Paris');
+  // 1 對 1：本人直接傳位置給官方帳號也算打卡；沒有行程的人不會出錯
+  const dmLocation = (userId, lat, lng) => ({ type: 'message', replyToken: 'r', timestamp: Date.now(), source: { type: 'user', userId }, message: { id: '3', type: 'location', title: 'DM', address: '', latitude: lat, longitude: lng } });
+  await webhookEvent(dmLocation(A_UID, 47.3769, 8.5417)); // 蘇黎世
+  view = (await db.doc(`views/${trip.groupReadToken}`).get()).data();
+  assert.equal(view.recent.length, beforeN + 2, 'direct-message location counted as checkin');
+  assert.equal(view.recent[0].tz, 'Europe/Zurich');
+  await webhookEvent(dmLocation(B_UID, 1, 1)); // B 沒有行程 → 只回覆，不寫入
+  await webhookEvent({ type: 'follow', replyToken: 'r', timestamp: Date.now(), source: { type: 'user', userId: B_UID } });
+  await webhookEvent({ type: 'message', replyToken: 'r', timestamp: Date.now(), source: { type: 'user', userId: A_UID }, message: { id: '4', type: 'text', text: '備註 私訊補的備註' } });
+  view = (await db.doc(`views/${trip.groupReadToken}`).get()).data();
+  assert.equal(view.recent[0].note, '私訊補的備註', 'owner command works in DM');
+  log('direct-message checkin + commands ok');
+
   // 重綁另一個群組會解除舊群組
   r = await call('POST', '/line/bind-code', undefined, sessA);
   const G2 = 'C' + 'b'.repeat(32);
