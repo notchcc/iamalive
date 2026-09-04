@@ -133,6 +133,47 @@ async function main() {
   assert.ok(Math.abs(dl16.getTime() - (Date.now() + 16 * H)) < 60_000, 'deadline = now + 16h');
   log('checkin with nextHours=16 ok');
 
+  // 照片打卡（multipart）：1x1 JPEG，帶 takenAt
+  {
+    const jpeg = Buffer.from(
+      '/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AVN//2Q==',
+      'base64',
+    );
+    const fd = new FormData();
+    fd.append('lat', '46.6863');
+    fd.append('lng', '7.8632'); // Interlaken
+    fd.append('note', '少女峰');
+    fd.append('takenAt', new Date(Date.now() - 2 * H).toISOString());
+    fd.append('photo', new Blob([jpeg], { type: 'image/jpeg' }), 'p.jpg');
+    const res0 = await fetch(`${BASE}/checkin/photo`, { method: 'POST', headers: { 'x-write-token': TOKEN }, body: fd });
+    const j0 = await res0.json();
+    assert.equal(res0.status, 200, JSON.stringify(j0));
+    assert.equal(j0.tz, 'Europe/Zurich');
+    assert.ok(j0.photoId);
+    view = (await db.doc(`views/${trip.groupReadToken}`).get()).data();
+    assert.equal(view.recent[0].photoId, j0.photoId);
+    assert.equal(view.recent[0].src, 'photo');
+    assert.ok(view.recent[0].takenAt, 'takenAt stored');
+    // 家人頁取圖：正確 token 200、錯誤 token 404
+    const img = await fetch(`${BASE}/p/${trip.groupReadToken}/${j0.photoId}`);
+    assert.equal(img.status, 200);
+    assert.equal(img.headers.get('content-type'), 'image/jpeg');
+    assert.equal((await img.arrayBuffer()).byteLength, jpeg.length);
+    const bad = await fetch(`${BASE}/p/notavalidtoken_notavalid/${j0.photoId}`);
+    assert.equal(bad.status, 404);
+    // 沒有檔案 → 400；非圖片 → 415
+    const fd2 = new FormData();
+    fd2.append('lat', '1');
+    fd2.append('lng', '1');
+    assert.equal((await fetch(`${BASE}/checkin/photo`, { method: 'POST', headers: { 'x-write-token': TOKEN }, body: fd2 })).status, 400);
+    const fd3 = new FormData();
+    fd3.append('lat', '1');
+    fd3.append('lng', '1');
+    fd3.append('photo', new Blob(['hi'], { type: 'text/plain' }), 'x.txt');
+    assert.equal((await fetch(`${BASE}/checkin/photo`, { method: 'POST', headers: { 'x-write-token': TOKEN }, body: fd3 })).status, 415);
+    log('photo checkin + photo serving ok');
+  }
+
   // 驗證錯誤
   r = await call('POST', '/checkin', { lat: 999, lng: 0 });
   assert.equal(r.status, 400);
@@ -156,7 +197,7 @@ async function main() {
   assert.equal(r.json.length, 2);
   view = (await db.doc(`views/${momToken}`).get()).data();
   assert.equal(view.label, '媽媽');
-  assert.equal(view.recent.length, 2, 'new watcher gets existing history');
+  assert.equal(view.recent.length, 3, 'new watcher gets existing history');
   r = await call('DELETE', `/trips/${trip.id}/watchers/${momToken}`);
   assert.equal(r.status, 200);
   assert.equal((await db.doc(`views/${momToken}`).get()).exists, false);

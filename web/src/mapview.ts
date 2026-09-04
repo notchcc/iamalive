@@ -11,7 +11,19 @@ const SOURCE_LABEL: Record<RecentItem['src'], string> = {
   line: 'LINE 位置',
   'web-gps': '瀏覽器定位',
   manual: '手動選點',
+  photo: '照片',
 };
+
+export type PhotoUrlFn = (photoId: string) => string;
+
+/** 拍攝時間與上傳時間相差超過 5 分鐘時，顯示拍攝時間。 */
+function takenLine(it: RecentItem): string {
+  if (!it.takenAt) return '';
+  const taken = it.takenAt.toDate();
+  const at = it.at.toDate();
+  if (Math.abs(at.getTime() - taken.getTime()) < 5 * 60_000) return '';
+  return `拍攝於 ${esc(fmtDateTime(taken, TAIPEI))} 台北${sameAsTaipei(taken, it.tz) ? '' : `（${esc(tzLabel(it.tz))} ${esc(fmtTime(taken, it.tz))}）`}`;
+}
 
 export function tileLayer(): L.TileLayer {
   const key = import.meta.env.VITE_MAPTILER_KEY as string | undefined;
@@ -41,7 +53,7 @@ export class TrackLayer {
     this.group.addTo(map);
   }
 
-  render(items: RecentItem[], opts: { fit?: boolean } = {}): void {
+  render(items: RecentItem[], opts: { fit?: boolean; photoUrl?: PhotoUrlFn } = {}): void {
     this.group.clearLayers();
     if (!items.length) return;
     const pts: L.LatLngExpression[] = [];
@@ -62,7 +74,7 @@ export class TrackLayer {
         fillOpacity: 0.9,
         dashArray: it.src === 'manual' ? '3 3' : undefined,
       });
-      marker.bindPopup(popupHtml(it));
+      marker.bindPopup(popupHtml(it, opts.photoUrl), { maxWidth: 260 });
       marker.addTo(this.group);
     });
     if (pts.length > 1) {
@@ -98,16 +110,18 @@ export function mapsUrl(it: RecentItem): string {
   return `https://www.google.com/maps?q=${it.lat.toFixed(6)},${it.lng.toFixed(6)}`;
 }
 
-function popupHtml(it: RecentItem): string {
+function popupHtml(it: RecentItem, photoUrl?: PhotoUrlFn): string {
   const at = it.at.toDate();
-  return `<b>${esc(fmtDateTime(at, TAIPEI))} 台北</b>${
+  const photo = it.photoId && photoUrl ? `<a href="${photoUrl(it.photoId)}" target="_blank" rel="noopener"><img class="popup-photo" src="${photoUrl(it.photoId)}" alt="" loading="lazy" /></a><br>` : '';
+  const taken = takenLine(it);
+  return `${photo}<b>${esc(fmtDateTime(at, TAIPEI))} 台北</b>${taken ? `<br><small>${taken}</small>` : ''}${
     sameAsTaipei(at, it.tz) ? '' : `<br>${esc(tzLabel(it.tz))} ${esc(fmtTime(at, it.tz))}`
   }<br>📍 ${esc(placeText(it))}<br><a href="${mapsUrl(it)}" target="_blank" rel="noopener">${esc(coordText(it))}</a>${
     it.note ? `<br>${esc(it.note)}` : ''
   }<br><small>${SOURCE_LABEL[it.src]} · ${accuracyText(it)}</small>`;
 }
 
-export function renderTimeline(el: HTMLElement, items: RecentItem[], now = new Date()): void {
+export function renderTimeline(el: HTMLElement, items: RecentItem[], now = new Date(), photoUrl?: PhotoUrlFn): void {
   if (!items.length) {
     el.innerHTML = '<p class="muted">尚無回報</p>';
     return;
@@ -116,8 +130,14 @@ export function renderTimeline(el: HTMLElement, items: RecentItem[], now = new D
     .map((it) => {
       const at = it.at.toDate();
       const local = sameAsTaipei(at, it.tz) ? '' : `<span class="local">${esc(tzLabel(it.tz))} ${esc(fmtTime(at, it.tz))}</span>`;
-      return `<li class="tl-item src-${it.src}">
+      const photo = it.photoId && photoUrl
+        ? `<a class="tl-photo" href="${photoUrl(it.photoId)}" target="_blank" rel="noopener"><img src="${photoUrl(it.photoId)}" alt="" loading="lazy" /></a>`
+        : '';
+      const taken = takenLine(it);
+      return `<li class="tl-item src-${it.src}${photo ? ' has-photo' : ''}">
+        ${photo}
         <div class="tl-time"><b>${esc(fmtDateTime(at, TAIPEI))}</b> ${local}<span class="ago">${esc(fmtAgo(at, now))}</span></div>
+        ${taken ? `<div class="tl-taken">${taken}</div>` : ''}
         <div class="tl-place">📍 <b>${esc(placeText(it))}</b>
           <a class="coord" href="${mapsUrl(it)}" target="_blank" rel="noopener">${esc(coordText(it))}</a></div>
         <div class="tl-body">${it.note ? esc(it.note) : '<span class="muted">已報平安</span>'}</div>

@@ -38,6 +38,7 @@ export function renderFamilyPage(root: HTMLElement, token: string): () => void {
 
   let view: View | null = null;
   let firstFit = true;
+  const photoUrl = (id: string): string => `/api/p/${encodeURIComponent(token)}/${encodeURIComponent(id)}`;
 
   const renderClocks = (): void => {
     const now = new Date();
@@ -134,9 +135,9 @@ export function renderFamilyPage(root: HTMLElement, token: string): () => void {
     renderClocks();
     renderStatus();
     renderFlights();
-    track.render(view.recent, { fit: firstFit });
+    track.render(view.recent, { fit: firstFit, photoUrl });
     firstFit = false;
-    renderTimeline(timelineEl, view.recent);
+    renderTimeline(timelineEl, view.recent, new Date(), photoUrl);
     document.title = `${view.title} · iamalive`;
   };
 
@@ -146,7 +147,7 @@ export function renderFamilyPage(root: HTMLElement, token: string): () => void {
     renderStatus();
   }, 1000);
   const agoTimer = window.setInterval(() => {
-    if (view) renderTimeline(timelineEl, view.recent);
+    if (view) renderTimeline(timelineEl, view.recent, new Date(), photoUrl);
   }, 60_000);
 
   const unsub = onSnapshot(

@@ -2,7 +2,7 @@
 
 | 項目 | 內容 |
 |---|---|
-| 文件版本 | v0.5 |
+| 文件版本 | v0.6 |
 | 日期 | 2026-09-04 |
 | 狀態 | 設計定稿，待決事項已全部定案，可進入開發 |
 
@@ -15,6 +15,7 @@
 | v0.3 | 通知改為官方帳號推播到家人 LINE 群組；移除 PWA 推播層；打卡入口以 iOS 捷徑為主 |
 | v0.4 | 待決事項定案：警報參數與安靜時段補發（台北時間）、打卡靜默只推狀態變化、位置訊息附家人頁連結、保留家人頁；新增旅人時區與台北雙時鐘 |
 | v0.5 | 新增**航段**（多筆，當地時間輸入），飛行中不警報、期限順延至降落後 3 小時；打卡紀錄加入**反向地理編碼城市**與經緯度；行程開始前不警報；webhook 未綁定時自動綁定首個群組 |
+| v0.6 | 新增**照片打卡**：捷徑 D（分享表單）與 `/me` 上傳，以照片 EXIF 的 GPS 與拍攝時間為打卡資訊；照片存私有 GCS bucket，家人頁經 token 驗證取圖並顯示縮圖 |
 
 ---
 
@@ -94,6 +95,7 @@
 | 時區 | `tz-lookup`（座標 → IANA 時區，離線、體積小） | 每筆打卡推算旅人時區 |
 | 時間格式 | `Intl.DateTimeFormat` / `date-fns-tz` | 前後端皆以 IANA 時區格式化 |
 | 打卡入口 | iOS 捷徑（主）、LINE 位置訊息（輔）、網頁（備援） | 見 §6 |
+| 照片 | 私有 GCS bucket（`PHOTO_BUCKET`，asia-east1，公開存取防護 enforced） | 只有 Functions 服務帳號有 objectAdmin；家人頁經 `/api/p/{token}/{id}` 取圖 |
 | 秘密 | Firebase Secret Manager (`defineSecret`) | 不放 Firestore、不進 repo |
 
 ---
@@ -169,11 +171,13 @@
 |---|---|---|
 | `geo` | geopoint | 座標 |
 | `accuracy` | number \| null | 公尺；捷徑與 LINE 位置訊息為 null |
-| `source` | string | `shortcut` / `line` / `web-gps` / `manual` |
+| `source` | string | `shortcut` / `line` / `web-gps` / `manual` / `photo` |
 | `tz` | string | 該座標的 IANA 時區，伺服器以 `tz-lookup` 推算 |
 | `place` | string \| null | 「城市, 國家」，打卡時以 OSM Nominatim 反向地理編碼（4 秒逾時，失敗為 null，顯示時退回時區城市名） |
 | `note` | string | ≤ 200 字，可空 |
 | `nextHours` | number \| null | 本次預告「下次幾小時後回報」 |
+| `photoId` | string \| null | 照片物件 ID（GCS `photos/{tripId}/{photoId}`），無照片為 null |
+| `takenAt` | timestamp \| null | 照片 EXIF 拍攝時間；**期限仍以 `createdAt` 計算**，此欄位只用於顯示 |
 | `createdAt` | timestamp | 伺服器時間 |
 | `clientAt` | timestamp \| null | 裝置時間 |
 
@@ -188,7 +192,7 @@
 | `lastCheckinAt` / `nextDeadlineAt` / `offlineUntil` | timestamp \| null | 複製自 trip |
 | `alerted` | boolean | 複製自 trip，家人頁頂部狀態用 |
 | `flights` | array\<FlightSegment\> | 複製自 trip，家人頁航段區塊與飛行中狀態用 |
-| `recent` | array\<map\> | 最近 100 筆 `{lat, lng, acc, src, tz, place, note, at}` |
+| `recent` | array\<map\> | 最近 100 筆 `{lat, lng, acc, src, tz, place, note, photoId, takenAt, at}` |
 | `updatedAt` | timestamp | |
 
 每次打卡、預告離線、警報狀態變化、結案，Function 在同一個 batch 內更新 `trips` 與該行程所有 `views/*`。
@@ -229,6 +233,8 @@ service cloud.firestore {
 | POST | `/api/trips` | 建立行程 | 寫 `trips`；推「行程開始」 |
 | POST | `/api/trips/:id/end` | 結束行程 | `status = completed`，同步 views，推「行程結束」 |
 | POST | `/api/trips/:id/offline` | 預告離線 | `{ hours }` → `offlineUntil`、`nextDeadlineAt = offlineUntil + interval`，推「將離線至 T」 |
+| POST | `/api/checkin/photo` | 照片打卡 | `multipart/form-data`：`photo`（檔案，≤ 8 MB，jpeg/png/heic/webp）+ `lat`、`lng`、`accuracy?`、`note?`、`nextHours?`、`takenAt?`、`clientAt?`；存入 GCS 後走與 `/checkin` 相同流程，`source = photo` |
+| GET | `/api/p/:readToken/:photoId` | 家人頁取圖 | **不需寫入 token**；驗證 `views/{readToken}` 存在且照片屬於該行程後串流回傳，`Cache-Control: private, max-age=86400` |
 | PUT | `/api/trips/:id/flights` | 整批更新航段 | `{ flights: [{ flightNo, fromCity, fromTz, departLocal, toCity, toTz, arriveLocal }] }`，`*Local` 為 `YYYY-MM-DDTHH:mm` 當地時間；驗證時區有效、降落晚於起飛、單段 ≤ 30 小時 |
 | POST | `/api/line/bind` | 手動綁定群組 | `{ groupId }` |
 | POST | `/api/trips/:id/watchers` | 新增家人頁連結 | 產生 readToken，建立 `views/{token}`，回傳連結 |
@@ -325,6 +331,12 @@ reply 免費，不計額度。非旅行者傳的位置訊息忽略。
 
 **自動化（提醒用）**：每日固定時間「顯示通知：該報平安了」，或於期限前由 `/api/trips/active` 取 `nextDeadlineAt` 後動態顯示。不送出位置。
 
+### 6.1.3 捷徑 D「用照片報平安」（分享表單）
+
+- 拍完照後手動觸發：相機縮圖或 Photos → 分享 → 捷徑；也可從主畫面執行並選照片。**不做自動觸發**（iOS 沒有「新照片」事件，「相機關閉」代理觸發不可靠且會重複）。
+- 流程：取影像「位置」（EXIF GPS）→ 無則退回目前定位 → 取「拍攝日期」→ 縮到 1600px、轉 JPEG 不保留詮釋資料 → 表單 POST `/api/checkin/photo`。
+- 詳細步驟見 `shortcuts/README.md`。
+
 ### 6.2 LINE 群組位置訊息（輔助路徑）
 
 - 在家人群組按「＋ → 位置資訊 → 傳送」，約 3 次點擊、5–8 秒。
@@ -337,6 +349,7 @@ reply 免費，不計額度。非旅行者傳的位置訊息忽略。
 - 「用瀏覽器定位打卡」：`getCurrentPosition({ enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 })`，`source = web-gps`，此路徑有精度值。
 - 「地圖選點打卡」：定位失敗時的手動路徑，`source = manual`。
 - 建立 / 結束行程、預告離線、新增 / 撤銷家人連結、顯示群組綁定狀態與本月額度。
+- **用照片打卡**卡片：`<input type=file accept=image/*>`（iPhone 顯示拍照 / 圖庫），瀏覽器端以 `exifr` 讀 GPS、拍攝時間、`GPSHPositioningError`，無 GPS 時可改用目前定位；`createImageBitmap` 縮圖至 1600px 後 multipart 上傳。iOS Safari 選圖是否保留 GPS EXIF 因版本而異，需實機確認。
 - **航段**卡片：列表與刪除；新增表單含航班號碼、起飛城市 / 時區 / 當地時間、降落城市 / 時區 / 當地時間；時區欄為 datalist（常用城市中文對照），選時區自動帶入城市名，新增後下一段的起飛欄自動帶入上一段目的地。
 - 內嵌與家人頁相同的地圖與時間軸元件（自用回顧）。
 
@@ -456,6 +469,7 @@ export const checkOverdue = onSchedule(
 
 - 狀態卡在飛行中改為藍色「✈️ 飛行中 BR61」，副標「台北 → 維也納，預計 台北 MM/DD HH:mm（維也納 HH:mm）降落，落地後 3 小時內回報」；非飛行中且有下一段時顯示「下一段 … 起飛」。
 - 狀態卡下方「航段」區塊列出所有航段（各地當地時間）與狀態：已降落 / 飛行中 / 未起飛。
+- 有照片的打卡卡片左側顯示 96px 縮圖，點開看原圖（同一 token 保護的網址）；拍攝時間與上傳時間相差 5 分鐘以上時顯示「拍攝於 …」。地圖 popup 亦顯示縮圖。
 - 最後回報行與時間軸每張卡片顯示 **📍 城市, 國家**（`place`，查不到退回時區城市名）與 **經緯度**（小數 5 位，連到 Google Maps）。地圖 popup 同。
 
 ### 8.2 雙時鐘規則
@@ -634,3 +648,4 @@ firebase functions:secrets:set TRAVELER_LINE_UID
 | 5 | 時區顯示 | 家人頁與所有訊息同時顯示台北與旅人當地時間；旅人時區由座標推算 |
 | 6 | 航段 | 多筆、當地時間輸入；飛行中不警報，期限順延至降落後 3 小時 |
 | 7 | 地點顯示 | 打卡時反向地理編碼存城市；卡片顯示城市 + 經緯度 + 地圖連結 |
+| 8 | 照片打卡 | 手動觸發（捷徑分享表單 / 網頁上傳），不自動；群組訊息不附照片 |

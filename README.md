@@ -36,8 +36,17 @@ firebase functions:secrets:set LINE_CHANNEL_SECRET
 firebase functions:secrets:set LINE_CHANNEL_ACCESS_TOKEN
 firebase functions:secrets:set TRAVELER_LINE_UID     # 先隨便填，步驟 5 再更新
 
-cp functions/.env.example functions/.env             # 填 PUBLIC_BASE_URL
+cp functions/.env.example functions/.env             # 填 PUBLIC_BASE_URL、PHOTO_BUCKET
 cp web/.env.example web/.env                         # 填 Firebase Web 設定與 MapTiler key
+```
+
+### 3.1 照片 bucket
+
+照片存在一個**私有** GCS bucket，不用 Firebase Storage 預設 bucket。建立後把名稱填進 `functions/.env` 的 `PHOTO_BUCKET`，並授權 Functions 的服務帳號（`<專案編號>-compute@developer.gserviceaccount.com`）`roles/storage.objectAdmin`。用 gcloud：
+
+```bash
+gcloud storage buckets create gs://<專案ID>-photos --location=asia-east1 --uniform-bucket-level-access --public-access-prevention
+gcloud storage buckets add-iam-policy-binding gs://<專案ID>-photos --member=serviceAccount:<專案編號>-compute@developer.gserviceaccount.com --role=roles/storage.objectAdmin
 ```
 
 ### 4. 部署
@@ -45,10 +54,10 @@ cp web/.env.example web/.env                         # 填 Firebase Web 設定�
 ```bash
 cd functions && npm install && npm test && cd ..
 cd web && npm install && cd ..
-firebase deploy
+firebase deploy --only firestore,functions,hosting
 ```
 
-部署輸出會列出 `lineWebhook` 的 URL，填回 LINE Developers 的 Webhook URL。
+（不部署 `storage` 規則：照片 bucket 不是 Firebase 預設 bucket，規則檔只給 emulator 用。）部署輸出會列出 `lineWebhook` 的 URL，填回 LINE Developers 的 Webhook URL。
 
 ### 5. 綁定群組與旅行者身分
 

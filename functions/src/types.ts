@@ -1,7 +1,7 @@
 import type { GeoPoint, Timestamp } from 'firebase-admin/firestore';
 
 export type TripStatus = 'active' | 'completed';
-export type CheckinSource = 'shortcut' | 'line' | 'web-gps' | 'manual';
+export type CheckinSource = 'shortcut' | 'line' | 'web-gps' | 'manual' | 'photo';
 
 export interface FlightSegment {
   flightNo: string;
@@ -51,6 +51,10 @@ export interface Checkin {
   place: string | null;
   note: string;
   nextHours: number | null;
+  /** 照片 ID（GCS 物件名），無照片為 null。 */
+  photoId: string | null;
+  /** 照片拍攝時間（EXIF），無則 null。期限仍以 createdAt 計算。 */
+  takenAt: Timestamp | null;
   createdAt: Timestamp;
   clientAt: Timestamp | null;
 }
@@ -63,6 +67,8 @@ export interface RecentItem {
   tz: string;
   place: string | null;
   note: string;
+  photoId: string | null;
+  takenAt: Timestamp | null;
   at: Timestamp;
 }
 

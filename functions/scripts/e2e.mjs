@@ -33,7 +33,7 @@ if (!existsSync(secretFile)) {
 }
 const envLocal = resolve(fnDir, '.env.local');
 if (!existsSync(envLocal)) {
-  writeFileSync(envLocal, 'PUBLIC_BASE_URL=http://localhost:5000\n');
+  writeFileSync(envLocal, 'PUBLIC_BASE_URL=http://localhost:5000\nPHOTO_BUCKET=demo-iamalive-photos\n');
   console.log('[e2e] wrote functions/.env.local');
 }
 
@@ -41,7 +41,7 @@ const firebaseBin = process.env.FIREBASE_BIN ?? 'firebase';
 const body = resolve(here, 'e2e-body.mjs');
 const r = spawnSync(
   firebaseBin,
-  ['emulators:exec', '--only', 'functions,firestore', '--project', 'demo-iamalive', `node ${JSON.stringify(body)}`],
+  ['emulators:exec', '--only', 'functions,firestore,storage', '--project', 'demo-iamalive', `node ${JSON.stringify(body)}`],
   { cwd: rootDir, stdio: 'inherit', env: { ...process.env, FIREBASE_E2E: '1' } },
 );
 process.exit(r.status ?? 1);

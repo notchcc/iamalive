@@ -17,6 +17,9 @@ export const TRAVELER_LINE_UID = defineSecret('TRAVELER_LINE_UID');
  */
 export const PUBLIC_BASE_URL = defineString('PUBLIC_BASE_URL', { default: '' });
 
+/** 照片 bucket（私有，只由 Functions 存取）。於 functions/.env 設定 PHOTO_BUCKET=... */
+export const PHOTO_BUCKET = defineString('PHOTO_BUCKET', { default: '' });
+
 export const LINE_SECRETS = [LINE_CHANNEL_SECRET, LINE_CHANNEL_ACCESS_TOKEN, TRAVELER_LINE_UID];
 export const ALL_SECRETS = [WRITE_TOKEN, ...LINE_SECRETS];
 

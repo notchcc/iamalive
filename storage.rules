@@ -1,0 +1,9 @@
+rules_version = '2';
+// 照片 bucket 只由 Cloud Functions（Admin SDK）存取；用戶端一律拒絕。
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -107,3 +107,14 @@ select { font: inherit; padding: 10px 12px; border: 1px solid var(--line); borde
 @media (max-width: 480px) { .grid2 { grid-template-columns: 1fr; } }
 .flight-list .flight { grid-template-columns: auto 1fr auto; }
 .flight-list button { padding: 4px 8px; font-size: 12px; }
+
+/* 照片 */
+.tl-item.has-photo { display: grid; grid-template-columns: 96px 1fr; gap: 6px 12px; }
+.tl-item.has-photo .tl-photo { grid-row: 1 / span 5; align-self: start; }
+.tl-photo img { width: 96px; height: 96px; object-fit: cover; border-radius: 10px; display: block; background: #e5e7eb; }
+.tl-taken { font-size: 12px; color: var(--muted); }
+.popup-photo { width: 100%; max-height: 180px; object-fit: cover; border-radius: 8px; margin-bottom: 6px; }
+.photo-preview { display: flex; gap: 12px; align-items: flex-start; margin-top: 8px; }
+.photo-preview img { width: 120px; height: 120px; object-fit: cover; border-radius: 10px; background: #e5e7eb; }
+.photo-preview .info { font-size: 14px; flex: 1; }
+input[type="file"] { padding: 8px; }

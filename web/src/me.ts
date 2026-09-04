@@ -5,6 +5,7 @@ import L from 'leaflet';
 import { ApiError, api, getToken, setToken } from './api';
 import { renderFamilyPage } from './family';
 import { createMap } from './mapview';
+import { extractPhotoMeta, fmtBytes, shrinkImage } from './photo';
 import { CITY_NAMES, TAIPEI, fmtBoth, fmtDateTime, toLocalInput } from './time';
 import type { FlightInput, FlightJson, StatusJson, TripJson, WatcherJson } from './types';
 
@@ -63,6 +64,9 @@ export function renderMePage(root: HTMLElement): () => void {
         ACTIVE_TRIP_EXISTS: '已有進行中的行程',
         TRIP_NOT_ACTIVE: '行程不是進行中',
         VALIDATION: '欄位格式錯誤',
+        PHOTO_REQUIRED: '沒有收到照片',
+        UNSUPPORTED_IMAGE_TYPE: '不支援的圖片格式',
+        FILE_TOO_LARGE: '照片超過 8 MB',
       };
       return map[e.code] ?? e.message;
     }
@@ -189,6 +193,22 @@ export function renderMePage(root: HTMLElement): () => void {
           <div id="pick-map" class="map small"></div>
           <div class="row"><span id="pick-coord" class="muted">點地圖選擇位置</span><button id="pick-submit" disabled>以此位置打卡</button></div>
         </div>
+      </section>
+
+      <section class="card">
+        <h2>用照片打卡 <span class="muted">讀取照片的 GPS 與拍攝時間</span></h2>
+        <input id="photo-file" type="file" accept="image/*" />
+        <div id="photo-preview" class="photo-preview" hidden>
+          <img id="photo-img" alt="" />
+          <div class="info">
+            <div id="photo-meta"></div>
+            <div class="row">
+              <button id="photo-submit" disabled>上傳並打卡</button>
+              <button id="photo-gps" class="secondary" hidden>改用目前定位</button>
+            </div>
+          </div>
+        </div>
+        <p class="muted small">上傳前會縮到 1600px。備註與「下次回報」欄位共用上方輸入。</p>
       </section>
 
       <section class="card">
@@ -362,6 +382,82 @@ export function renderMePage(root: HTMLElement): () => void {
         toast('已新增航段');
       } catch (err) {
         toast(errText(err), 'err');
+      }
+    });
+
+    // ---- 照片打卡 ----
+    const photoFile = root.querySelector<HTMLInputElement>('#photo-file')!;
+    const photoPreview = root.querySelector<HTMLElement>('#photo-preview')!;
+    const photoImg = root.querySelector<HTMLImageElement>('#photo-img')!;
+    const photoMetaEl = root.querySelector<HTMLElement>('#photo-meta')!;
+    const photoSubmit = root.querySelector<HTMLButtonElement>('#photo-submit')!;
+    const photoGpsBtn = root.querySelector<HTMLButtonElement>('#photo-gps')!;
+    let photoState: { file: File; lat: number | null; lng: number | null; accuracy: number | null; takenAt: Date | null } | null = null;
+
+    const renderPhotoMeta = (): void => {
+      if (!photoState) return;
+      const p = photoState;
+      const loc = p.lat != null && p.lng != null ? `📍 ${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}${p.accuracy ? ` ±${Math.round(p.accuracy)} m` : ''}` : '<span class="bad-text">照片沒有 GPS</span>';
+      const taken = p.takenAt ? `拍攝於 ${fmtBoth(p.takenAt, t.travelerTz)}` : '無拍攝時間';
+      photoMetaEl.innerHTML = `<div>${loc}</div><div class="muted">${esc(taken)} · ${esc(fmtBytes(p.file.size))}</div>`;
+      photoSubmit.disabled = !(p.lat != null && p.lng != null);
+      photoGpsBtn.hidden = false;
+    };
+
+    photoFile.addEventListener('change', async () => {
+      const file = photoFile.files?.[0];
+      if (!file) return;
+      photoPreview.hidden = false;
+      photoImg.src = URL.createObjectURL(file);
+      photoMetaEl.textContent = '讀取照片資訊…';
+      const meta = await extractPhotoMeta(file);
+      photoState = { file, ...meta };
+      renderPhotoMeta();
+    });
+
+    photoGpsBtn.addEventListener('click', () => {
+      photoGpsBtn.disabled = true;
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          if (photoState) {
+            photoState.lat = pos.coords.latitude;
+            photoState.lng = pos.coords.longitude;
+            photoState.accuracy = pos.coords.accuracy;
+            renderPhotoMeta();
+          }
+          photoGpsBtn.disabled = false;
+        },
+        (err) => {
+          photoGpsBtn.disabled = false;
+          toast(`定位失敗（${err.message}）`, 'err');
+        },
+        { enableHighAccuracy: true, timeout: 10_000, maximumAge: 60_000 },
+      );
+    });
+
+    photoSubmit.addEventListener('click', async () => {
+      if (!photoState || photoState.lat == null || photoState.lng == null) return;
+      photoSubmit.disabled = true;
+      photoSubmit.textContent = '上傳中…';
+      try {
+        const { blob, type } = await shrinkImage(photoState.file);
+        const fd = new FormData();
+        fd.append('lat', String(photoState.lat));
+        fd.append('lng', String(photoState.lng));
+        if (photoState.accuracy) fd.append('accuracy', String(photoState.accuracy));
+        const extras = payloadExtras();
+        if (extras.note) fd.append('note', extras.note);
+        if (extras.nextHours) fd.append('nextHours', String(extras.nextHours));
+        if (photoState.takenAt) fd.append('takenAt', photoState.takenAt.toISOString());
+        fd.append('clientAt', extras.clientAt);
+        fd.append('photo', blob, type === 'image/jpeg' ? 'photo.jpg' : photoState.file.name || 'photo');
+        const r = await api.checkinPhoto(fd);
+        toast(`已用照片打卡，下次期限 ${fmtBoth(new Date(r.nextDeadlineAt), r.tz)}`);
+        await load();
+      } catch (e) {
+        toast(errText(e), 'err');
+        photoSubmit.disabled = false;
+        photoSubmit.textContent = '上傳並打卡';
       }
     });
 

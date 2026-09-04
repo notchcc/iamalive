@@ -1,6 +1,6 @@
 import type { Timestamp } from 'firebase/firestore';
 
-export type CheckinSource = 'shortcut' | 'line' | 'web-gps' | 'manual';
+export type CheckinSource = 'shortcut' | 'line' | 'web-gps' | 'manual' | 'photo';
 
 export interface RecentItem {
   lat: number;
@@ -10,6 +10,8 @@ export interface RecentItem {
   tz: string;
   place?: string | null;
   note: string;
+  photoId?: string | null;
+  takenAt?: Timestamp | null;
   at: Timestamp;
 }
 

@@ -63,6 +63,20 @@ export const api = {
     nextHours?: number | null;
     clientAt?: string;
   }) => call<{ ok: true; nextDeadlineAt: string; tz: string; pushed: boolean; recovered: boolean }>('POST', '/checkin', input),
+  /** 照片打卡：multipart，欄位由呼叫端組好（photo、lat、lng、note、nextHours、takenAt、clientAt）。 */
+  checkinPhoto: async (form: FormData) => {
+    const res = await fetch('/api/checkin/photo', { method: 'POST', headers: { 'x-write-token': getToken() }, body: form });
+    if (!res.ok) {
+      let code = res.statusText;
+      try {
+        code = ((await res.json()) as { error?: string }).error ?? code;
+      } catch {
+        /* ignore */
+      }
+      throw new ApiError(res.status, code);
+    }
+    return (await res.json()) as { ok: true; photoId: string; nextDeadlineAt: string; tz: string; pushed: boolean; recovered: boolean };
+  },
   offline: (id: string, hours: number) =>
     call<{ ok: true; offlineUntil: string; nextDeadlineAt: string; pushed: boolean }>('POST', `/trips/${id}/offline`, { hours }),
   setFlights: (id: string, flights: FlightInput[]) => call<{ ok: true; flights: FlightJson[] }>('PUT', `/trips/${id}/flights`, { flights }),

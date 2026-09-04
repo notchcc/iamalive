@@ -55,6 +55,8 @@ function recentFromCheckins(docs: Checkin[]): RecentItem[] {
     tz: c.tz,
     place: c.place ?? null,
     note: c.note,
+    photoId: c.photoId ?? null,
+    takenAt: c.takenAt ?? null,
     at: c.createdAt,
   }));
 }
@@ -154,6 +156,8 @@ export interface CheckinInput {
   note: string;
   nextHours: number | null;
   clientAt: Date | null;
+  photoId?: string | null;
+  takenAt?: Date | null;
 }
 
 export interface CheckinResult {
@@ -181,6 +185,8 @@ export async function recordCheckin(snap: TripSnap, input: CheckinInput): Promis
     place,
     note: input.note,
     nextHours: input.nextHours,
+    photoId: input.photoId ?? null,
+    takenAt: input.takenAt ? Timestamp.fromDate(input.takenAt) : null,
     createdAt: Timestamp.fromDate(now),
     clientAt: input.clientAt ? Timestamp.fromDate(input.clientAt) : null,
   };

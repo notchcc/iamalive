@@ -23,6 +23,9 @@ import {
 } from './trips.js';
 import { fmtDateTime, isValidTz, monthKey, zonedToUtc } from './time.js';
 import type { FlightSegment } from './types.js';
+import { parseMultipart } from './multipart.js';
+import { MAX_PHOTO_BYTES, isAllowedImage, readPhoto, savePhoto } from './photos.js';
+import { viewsCol } from './db.js';
 
 function safeEqual(a: string, b: string): boolean {
   const ab = Buffer.from(a);
@@ -51,10 +54,21 @@ const CheckinSchema = z.object({
   lat: z.number().min(-90).max(90),
   lng: z.number().min(-180).max(180),
   accuracy: z.number().nonnegative().nullable().optional(),
-  source: z.enum(['shortcut', 'line', 'web-gps', 'manual']).default('shortcut'),
+  source: z.enum(['shortcut', 'line', 'web-gps', 'manual', 'photo']).default('shortcut'),
   note: z.string().max(200).optional().default(''),
   nextHours: z.number().min(1).max(168).nullable().optional(),
   clientAt: isoDate.nullable().optional(),
+});
+
+/** multipart 欄位皆為字串，先轉型再套用同一套規則。 */
+const PhotoFieldsSchema = z.object({
+  lat: z.coerce.number().min(-90).max(90),
+  lng: z.coerce.number().min(-180).max(180),
+  accuracy: z.coerce.number().nonnegative().optional(),
+  note: z.string().max(200).optional().default(''),
+  nextHours: z.coerce.number().min(1).max(168).optional(),
+  takenAt: isoDate.optional(),
+  clientAt: isoDate.optional(),
 });
 
 const CreateTripSchema = z
@@ -152,6 +166,33 @@ export function createApp(): express.Express {
     }),
   );
 
+  /** 家人頁取圖：以 readToken 驗證，不需寫入 token。 */
+  r.get(
+    '/p/:token/:photoId',
+    wrap(async (req, res) => {
+      const token = String(req.params.token);
+      if (!/^[A-Za-z0-9_-]{16,64}$/.test(token)) {
+        res.status(404).end();
+        return;
+      }
+      const view = await viewsCol.doc(token).get();
+      const tripId = view.data()?.tripId;
+      if (!tripId) {
+        res.status(404).end();
+        return;
+      }
+      const photo = await readPhoto(tripId, String(req.params.photoId));
+      if (!photo) {
+        res.status(404).end();
+        return;
+      }
+      res.setHeader('Content-Type', photo.contentType);
+      res.setHeader('Cache-Control', 'private, max-age=86400');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.end(photo.data);
+    }),
+  );
+
   r.use(requireWriteToken);
 
   r.get(
@@ -216,6 +257,43 @@ export function createApp(): express.Express {
       });
       res.json({
         ok: true,
+        nextDeadlineAt: result.nextDeadlineAt.toISOString(),
+        tz: result.tz,
+        pushed: result.pushed,
+        recovered: result.recovered,
+      });
+    }),
+  );
+
+  /** 照片打卡：multipart/form-data，欄位 photo（檔案）+ lat/lng/note/nextHours/takenAt。 */
+  r.post(
+    '/checkin/photo',
+    wrap(async (req, res) => {
+      let parsed;
+      try {
+        parsed = await parseMultipart(req, MAX_PHOTO_BYTES);
+      } catch (e) {
+        throw new HttpError(String((e as Error).message) === 'FILE_TOO_LARGE' ? 413 : 400, String((e as Error).message));
+      }
+      if (!parsed.file || parsed.file.data.length === 0) throw new HttpError(400, 'PHOTO_REQUIRED');
+      if (!isAllowedImage(parsed.file.mimeType)) throw new HttpError(415, 'UNSUPPORTED_IMAGE_TYPE');
+      const f = PhotoFieldsSchema.parse(parsed.fields);
+      const trip = await requireActiveTrip();
+      const photoId = await savePhoto(trip.id, parsed.file.data, parsed.file.mimeType);
+      const result = await recordCheckin(trip, {
+        lat: f.lat,
+        lng: f.lng,
+        accuracy: f.accuracy ?? null,
+        source: 'photo',
+        note: f.note,
+        nextHours: f.nextHours ?? null,
+        clientAt: f.clientAt ?? null,
+        photoId,
+        takenAt: f.takenAt ?? null,
+      });
+      res.json({
+        ok: true,
+        photoId,
         nextDeadlineAt: result.nextDeadlineAt.toISOString(),
         tz: result.tz,
         pushed: result.pushed,
