@@ -73,16 +73,29 @@ async function handleEvent(ev: Event): Promise<void> {
     return;
   }
 
+  if (!gid) return;
+
+  // 尚未綁定任何群組時，第一個送來事件的群組視為家人群組（個人用，bot 只會在一個群組）。
+  // 涵蓋「邀請 bot 時 webhook 尚未開啟、join 事件遺失」的情況。
+  if (!cfg.groupId) {
+    await lineConfigRef.set({ groupId: gid, joinedAt: Timestamp.now() }, { merge: true });
+    cfg.groupId = gid;
+    logger.warn('auto-bound group from first event', { gid, userId: userIdOf(ev), type: ev.type });
+  }
+
   // 其餘事件只處理已綁定群組。
-  if (!gid || gid !== cfg.groupId) return;
+  if (gid !== cfg.groupId) {
+    logger.info('event from unbound group ignored', { gid, type: ev.type });
+    return;
+  }
   if (ev.type !== 'message') return;
 
   const mev = ev as webhook.MessageEvent;
   const userId = userIdOf(ev);
   const replyToken = mev.replyToken;
-  if (!TRAVELER_LINE_UID.value()) {
-    // 初次設定：從 log 取得自己的 userId 後寫入 Secret。
-    logger.info('message from userId (set TRAVELER_LINE_UID)', { userId });
+  if (!isTraveler(userId)) {
+    // 初次設定：從 log 取得自己的 userId 後寫入 Secret TRAVELER_LINE_UID。
+    logger.info('message from non-traveler userId', { userId, type: mev.message.type });
   }
 
   if (mev.message.type === 'location') {

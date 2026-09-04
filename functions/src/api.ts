@@ -231,6 +231,16 @@ export function createApp(): express.Express {
     }),
   );
 
+  /** 手動綁定群組（從 log 取得 groupId 時用）。 */
+  r.post(
+    '/line/bind',
+    wrap(async (req, res) => {
+      const { groupId } = z.object({ groupId: z.string().regex(/^C[0-9a-f]{32}$/) }).parse(req.body);
+      await lineConfigRef.set({ groupId, joinedAt: Timestamp.now() }, { merge: true });
+      res.json({ ok: true });
+    }),
+  );
+
   /** 解除群組綁定（bot 被拉錯群組時用），之後重新邀請即可重綁。 */
   r.post(
     '/line/unbind',
