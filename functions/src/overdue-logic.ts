@@ -5,6 +5,7 @@
  * - 期限到後先發第 1 則；之後每 REPEAT_H 小時一則，直到 MAX_ALERTS。
  * - 落在台北安靜時段（23:00–07:00）的警報照發，但標記待補發；08:00 後第一次掃描補發一次，
  *   不計入 MAX_ALERTS，每次事件最多一次。
+ * - startAt 之前不警報。
  * - endAt + 24h 仍未結案 → 自動結案。
  * - 預告離線期間不警報。
  */
@@ -15,6 +16,7 @@ export const MAX_ALERTS = 4;
 export const AUTO_COMPLETE_GRACE_H = 24;
 
 export interface OverdueState {
+  startAt: Date;
   endAt: Date;
   nextDeadlineAt: Date;
   offlineUntil: Date | null;
@@ -40,6 +42,8 @@ export function decideOverdue(s: OverdueState, now: Date): OverdueDecision {
   if (s.endAt.getTime() + AUTO_COMPLETE_GRACE_H * HOUR_MS < now.getTime()) {
     return { action: 'complete' };
   }
+  // 行程尚未開始：不警報（開始前的打卡只是測試或提早回報）。
+  if (s.startAt.getTime() > now.getTime()) return { action: 'none' };
   if (s.nextDeadlineAt.getTime() > now.getTime()) return { action: 'none' };
   if (s.offlineUntil && s.offlineUntil.getTime() > now.getTime()) return { action: 'none' };
 

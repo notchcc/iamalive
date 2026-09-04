@@ -11,6 +11,7 @@ import type { Trip } from './types.js';
 
 function toState(t: Trip): OverdueState {
   return {
+    startAt: t.startAt.toDate(),
     endAt: t.endAt.toDate(),
     nextDeadlineAt: t.nextDeadlineAt.toDate(),
     offlineUntil: t.offlineUntil ? t.offlineUntil.toDate() : null,

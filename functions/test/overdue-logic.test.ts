@@ -11,6 +11,7 @@ const MORNING = new Date('2026-09-05T00:05:00Z');
 
 function base(over: Partial<OverdueState> = {}): OverdueState {
   return {
+    startAt: new Date('2026-09-01T00:00:00Z'),
     endAt: new Date('2026-09-20T00:00:00Z'),
     nextDeadlineAt: new Date(NOON.getTime() - H), // 一小時前到期
     offlineUntil: null,
@@ -26,6 +27,10 @@ function base(over: Partial<OverdueState> = {}): OverdueState {
 describe('decideOverdue', () => {
   it('does nothing before deadline', () => {
     expect(decideOverdue(base({ nextDeadlineAt: new Date(NOON.getTime() + H) }), NOON)).toEqual({ action: 'none' });
+  });
+
+  it('does nothing before startAt even if deadline passed', () => {
+    expect(decideOverdue(base({ startAt: new Date(NOON.getTime() + H) }), NOON)).toEqual({ action: 'none' });
   });
 
   it('does nothing during announced offline', () => {

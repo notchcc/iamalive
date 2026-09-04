@@ -163,7 +163,9 @@ export async function recordCheckin(snap: TripSnap, input: CheckinInput): Promis
   const now = new Date();
   const tz = tzFor(input.lat, input.lng);
   const hours = input.nextHours ?? trip.intervalHours;
-  const nextDeadlineAt = new Date(now.getTime() + hours * HOUR_MS);
+  // 行程開始前的打卡：期限從開始時間起算，避免出發前就觸發警報。
+  const base = trip.startAt.toDate() > now ? trip.startAt.toDate() : now;
+  const nextDeadlineAt = new Date(base.getTime() + hours * HOUR_MS);
 
   const checkin: Checkin = {
     geo: new GeoPoint(input.lat, input.lng),
