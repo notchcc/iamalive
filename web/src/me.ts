@@ -12,6 +12,28 @@ function esc(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
 }
 
+const TZ_GROUPS: Array<[string, string]> = [
+  ['亞洲', 'Asia/'],
+  ['歐洲', 'Europe/'],
+  ['美洲', 'America/'],
+  ['大洋洲', 'Australia/'],
+  ['太平洋', 'Pacific/'],
+];
+
+function tzSelect(name: string, selected: string): string {
+  const groups = TZ_GROUPS.map(([label, prefix]) => {
+    const opts = Object.entries(CITY_NAMES)
+      .filter(([tz]) => tz.startsWith(prefix))
+      .map(([tz, city]) => `<option value="${tz}"${tz === selected ? ' selected' : ''}>${esc(city)} · ${tz}</option>`)
+      .join('');
+    return `<optgroup label="${label}">${opts}</optgroup>`;
+  }).join('');
+  return `<select name="${name}" required>
+    <option value=""${selected ? '' : ' selected'} disabled>選擇時區</option>${groups}
+    <option value="__custom">其他（手動輸入 IANA 名稱）</option>
+  </select>`;
+}
+
 function toLocalInputValue(d: Date): string {
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
@@ -176,16 +198,13 @@ export function renderMePage(root: HTMLElement): () => void {
           <div class="grid2">
             <label>航班號碼<input name="flightNo" maxlength="10" required placeholder="BR61" /></label>
             <label>起飛城市<input name="fromCity" maxlength="30" required placeholder="台北" /></label>
-            <label>起飛時區<input name="fromTz" list="tzlist" required value="Asia/Taipei" /></label>
+            <label>起飛時區${tzSelect('fromTz', 'Asia/Taipei')}<input class="tz-custom" name="fromTzCustom" placeholder="IANA 時區，如 Europe/Oslo" hidden /></label>
             <label>起飛時間（當地）<input name="departLocal" type="datetime-local" required /></label>
-            <label>降落城市<input name="toCity" maxlength="30" required placeholder="維也納" /></label>
-            <label>降落時區<input name="toTz" list="tzlist" required placeholder="Europe/Vienna" /></label>
+            <label>降落城市<input name="toCity" maxlength="30" required placeholder="蘇黎世" /></label>
+            <label>降落時區${tzSelect('toTz', '')}<input class="tz-custom" name="toTzCustom" placeholder="IANA 時區，如 Europe/Oslo" hidden /></label>
             <label>降落時間（當地）<input name="arriveLocal" type="datetime-local" required /></label>
           </div>
           <button type="submit">新增航段</button>
-          <datalist id="tzlist">${Object.entries(CITY_NAMES)
-            .map(([tz, name]) => `<option value="${tz}">${esc(name)}</option>`)
-            .join('')}</datalist>
         </form>
       </section>
 
@@ -272,7 +291,7 @@ export function renderMePage(root: HTMLElement): () => void {
         ? flights
             .map(
               (f, i) => `<li class="flight"><span class="fno">${esc(f.flightNo)}</span>
-                <span class="leg">${esc(f.fromCity)} ${esc(f.departLocal)} → ${esc(f.toCity)} ${esc(f.arriveLocal)}</span>
+                <span class="leg">${esc(f.fromCity)} <small>${esc(f.fromTz)}</small> ${esc(f.departLocal)} → ${esc(f.toCity)} <small>${esc(f.toTz)}</small> ${esc(f.arriveLocal)}</span>
                 <button type="button" class="danger" data-del-flight="${i}">刪除</button></li>`,
             )
             .join('')
@@ -296,15 +315,27 @@ export function renderMePage(root: HTMLElement): () => void {
 
     const flightForm = root.querySelector<HTMLFormElement>('#add-flight')!;
     // 選了時區就把空白的城市欄位帶入城市名
+    const tzValue = (name: 'fromTz' | 'toTz'): string => {
+      const sel = (flightForm.elements.namedItem(name) as HTMLSelectElement).value;
+      if (sel !== '__custom') return sel;
+      return (flightForm.elements.namedItem(`${name}Custom`) as HTMLInputElement).value.trim();
+    };
     for (const [tzName, cityName] of [
       ['fromTz', 'fromCity'],
       ['toTz', 'toCity'],
     ] as const) {
-      const tzEl = flightForm.elements.namedItem(tzName) as HTMLInputElement;
-      tzEl.addEventListener('change', () => {
-        const tz = tzEl.value;
+      const sel = flightForm.elements.namedItem(tzName) as HTMLSelectElement;
+      const custom = flightForm.elements.namedItem(`${tzName}Custom`) as HTMLInputElement;
+      sel.addEventListener('change', () => {
+        custom.hidden = sel.value !== '__custom';
+        custom.required = sel.value === '__custom';
         const cityEl = flightForm.elements.namedItem(cityName) as HTMLInputElement;
-        if (!cityEl.value && CITY_NAMES[tz]) cityEl.value = CITY_NAMES[tz];
+        // 選了時區就帶入城市名（若城市欄為空或仍是上一個時區的城市名）
+        const prev = cityEl.dataset.auto;
+        if (CITY_NAMES[sel.value] && (!cityEl.value || cityEl.value === prev)) {
+          cityEl.value = CITY_NAMES[sel.value];
+          cityEl.dataset.auto = cityEl.value;
+        }
       });
     }
     flightForm.addEventListener('submit', async (e) => {
@@ -313,10 +344,10 @@ export function renderMePage(root: HTMLElement): () => void {
       const input: FlightInput = {
         flightNo: String(fd.get('flightNo')).trim().toUpperCase(),
         fromCity: String(fd.get('fromCity')).trim(),
-        fromTz: String(fd.get('fromTz')).trim(),
+        fromTz: tzValue('fromTz'),
         departLocal: String(fd.get('departLocal')),
         toCity: String(fd.get('toCity')).trim(),
-        toTz: String(fd.get('toTz')).trim(),
+        toTz: tzValue('toTz'),
         arriveLocal: String(fd.get('arriveLocal')),
       };
       try {
@@ -324,7 +355,9 @@ export function renderMePage(root: HTMLElement): () => void {
         flights = r.flights;
         renderFlightList();
         flightForm.reset();
-        (flightForm.elements.namedItem('fromTz') as HTMLInputElement).value = input.toTz; // 下一段通常從上一段的目的地出發
+        // 下一段通常從上一段的目的地出發
+        const fromSel = flightForm.elements.namedItem('fromTz') as HTMLSelectElement;
+        if ([...fromSel.options].some((o) => o.value === input.toTz)) fromSel.value = input.toTz;
         (flightForm.elements.namedItem('fromCity') as HTMLInputElement).value = input.toCity;
         toast('已新增航段');
       } catch (err) {

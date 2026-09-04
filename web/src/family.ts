@@ -12,6 +12,12 @@ function esc(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
 }
 
+/** 城市名，若時區城市與輸入城市不同則附註時區城市，方便發現選錯時區。 */
+function cityTz(city: string, tz: string): string {
+  const label = tzLabel(tz);
+  return label === city ? esc(city) : `${esc(city)} <small>(${esc(label)})</small>`;
+}
+
 export function renderFamilyPage(root: HTMLElement, token: string): () => void {
   root.innerHTML = `
     <div class="page family">
@@ -61,7 +67,7 @@ export function renderFamilyPage(root: HTMLElement, token: string): () => void {
     let head = '';
     let sub = '';
     if (view.status === 'active' && inFlight) {
-      cls = 'flight';
+      cls = 'inflight';
       head = `✈️ 飛行中 ${inFlight.flightNo}`;
       sub = `${inFlight.fromCity} → ${inFlight.toCity}，預計 ${fmtBoth(inFlight.arriveAt, inFlight.toTz)} 降落，落地後 3 小時內回報`;
     } else if (view.status === 'completed') {
@@ -116,7 +122,7 @@ export function renderFamilyPage(root: HTMLElement, token: string): () => void {
           const state = now > f.arriveAt ? 'done' : currentFlight([f], now) ? 'now' : 'todo';
           const label = state === 'done' ? '已降落' : state === 'now' ? '飛行中' : '未起飛';
           return `<li class="flight ${state}"><span class="fno">${esc(f.flightNo)}</span>
-            <span class="leg">${esc(f.fromCity)} ${esc(fmtDateTime(f.departAt, f.fromTz))} → ${esc(f.toCity)} ${esc(fmtDateTime(f.arriveAt, f.toTz))}</span>
+            <span class="leg">${cityTz(f.fromCity, f.fromTz)} ${esc(fmtDateTime(f.departAt, f.fromTz))} → ${cityTz(f.toCity, f.toTz)} ${esc(fmtDateTime(f.arriveAt, f.toTz))}</span>
             <span class="fstate">${label}</span></li>`;
         })
         .join('') +
