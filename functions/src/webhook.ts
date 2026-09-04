@@ -10,10 +10,15 @@ import type { webhook } from '@line/bot-sdk';
 import { logger } from 'firebase-functions/v2';
 import type { Request, Response } from 'express';
 import { familyUrl } from './config.js';
-import { Timestamp, bindCodesCol, db, groupsCol } from './db.js';
-import { recentListMessages, reply, textMsg, verifyLineSignature, whereMessages } from './line.js';
+import exifr from 'exifr';
+import { Timestamp, bindCodesCol, db, groupsCol, pendingPhotosCol } from './db.js';
+import { downloadMessageContent, recentListMessages, reply, textMsg, verifyLineSignature, whereMessages } from './line.js';
+import { MAX_PHOTO_BYTES, deletePhoto, isAllowedImage, savePhoto } from './photos.js';
 import { fmtBoth } from './time.js';
-import { endTrip, getActiveTrip, recentForTrip, recordCheckin, setOffline, updateLastNote } from './trips.js';
+import { attachPhotoToLastCheckin, endTrip, getActiveTrip, recentForTrip, recordCheckin, setOffline, updateLastNote } from './trips.js';
+
+/** 照片與位置的配對窗。 */
+const PAIR_WINDOW_MS = 15 * 60_000;
 
 type Event = webhook.Event;
 
@@ -65,7 +70,7 @@ export async function bindGroupWithCode(gid: string, code: string, userId: strin
 }
 
 const HELP_DM =
-  '直接傳送「位置」給我就會記錄一次平安回報。\n' +
+  '直接傳送「位置」給我就會記錄一次平安回報；傳照片再傳位置，會記成一筆含照片的打卡。\n' +
   '文字指令：\n' +
   '・離線 16 → 預告接下來 16 小時不會回報\n' +
   '・結束 → 結束目前行程\n' +
@@ -73,7 +78,21 @@ const HELP_DM =
   '・在哪 / 行程 → 查看最後位置與最近回報\n' +
   '行程的建立與家人群組綁定請到管理頁。';
 
-/** 擁有者的位置訊息 → 打卡並回覆。 */
+/** 取出並消耗這位使用者待配對的照片（若未過期且屬於同一行程）。 */
+async function takePendingPhoto(uid: string, tripId: string): Promise<{ photoId: string; takenAt: Date | null } | null> {
+  const ref = pendingPhotosCol.doc(uid);
+  const snap = await ref.get();
+  const p = snap.data();
+  if (!p) return null;
+  await ref.delete();
+  if (p.tripId !== tripId || p.expiresAt.toMillis() < Date.now()) {
+    await deletePhoto(p.tripId, p.photoId);
+    return null;
+  }
+  return { photoId: p.photoId, takenAt: p.takenAt ? p.takenAt.toDate() : null };
+}
+
+/** 擁有者的位置訊息 → 打卡並回覆；若有待配對的照片就一併附上。 */
 async function handleOwnerLocation(ownerUid: string, mev: webhook.MessageEvent): Promise<void> {
   const loc = mev.message as webhook.LocationMessageContent;
   const replyToken = mev.replyToken;
@@ -82,22 +101,91 @@ async function handleOwnerLocation(ownerUid: string, mev: webhook.MessageEvent):
     if (replyToken) await reply(replyToken, [textMsg('目前沒有進行中的行程，未記錄。請先到管理頁建立行程。')]);
     return;
   }
+  const pending = await takePendingPhoto(ownerUid, trip.id);
   const note = [loc.title, loc.address].filter(Boolean).join(' ').slice(0, 200);
   const r = await recordCheckin(trip, {
     lat: loc.latitude,
     lng: loc.longitude,
     accuracy: null,
-    source: 'line',
+    source: pending ? 'photo' : 'line',
     note,
     nextHours: null,
     clientAt: new Date(mev.timestamp),
+    photoId: pending?.photoId ?? null,
+    takenAt: pending?.takenAt ?? null,
   });
   if (replyToken) {
     const now = new Date();
     await reply(replyToken, [
-      textMsg(`已記錄 · ${fmtBoth(now, r.tz)}\n下次期限 ${fmtBoth(r.nextDeadlineAt, r.tz)}${r.recovered ? '\n（已解除逾時警報）' : ''}`),
+      textMsg(
+        `${pending ? '📷 ' : ''}已記錄 · ${fmtBoth(now, r.tz)}\n下次期限 ${fmtBoth(r.nextDeadlineAt, r.tz)}${r.recovered ? '\n（已解除逾時警報）' : ''}`,
+      ),
     ]);
   }
+}
+
+/**
+ * 擁有者的圖片訊息：
+ * 1. 圖片帶 GPS → 直接照片打卡。
+ * 2. 15 分鐘內剛打過卡且沒照片 → 附上去。
+ * 3. 否則暫存 15 分鐘，等位置訊息來配對。
+ */
+async function handleOwnerImage(ownerUid: string, mev: webhook.MessageEvent): Promise<void> {
+  const replyToken = mev.replyToken;
+  const trip = await getActiveTrip(ownerUid);
+  if (!trip) {
+    if (replyToken) await reply(replyToken, [textMsg('目前沒有進行中的行程，照片未記錄。')]);
+    return;
+  }
+  const content = await downloadMessageContent(mev.message.id, MAX_PHOTO_BYTES);
+  if (!content || !isAllowedImage(content.contentType)) {
+    if (replyToken) await reply(replyToken, [textMsg('照片無法讀取或過大（上限 8 MB）。')]);
+    return;
+  }
+  let gps: { latitude: number; longitude: number } | null = null;
+  let takenAt: Date | null = null;
+  try {
+    const g = await exifr.gps(content.data);
+    if (g && Number.isFinite(g.latitude) && Number.isFinite(g.longitude)) gps = g;
+    const t = (await exifr.parse(content.data, { pick: ['DateTimeOriginal'] })) as { DateTimeOriginal?: Date } | undefined;
+    if (t?.DateTimeOriginal instanceof Date) takenAt = t.DateTimeOriginal;
+  } catch {
+    /* 無 EXIF */
+  }
+  const photoId = await savePhoto(trip.id, content.data, content.contentType);
+
+  if (gps) {
+    const r = await recordCheckin(trip, {
+      lat: gps.latitude,
+      lng: gps.longitude,
+      accuracy: null,
+      source: 'photo',
+      note: '',
+      nextHours: null,
+      clientAt: new Date(mev.timestamp),
+      photoId,
+      takenAt,
+    });
+    if (replyToken) await reply(replyToken, [textMsg(`📷 已用照片位置打卡 · ${fmtBoth(new Date(), r.tz)}\n下次期限 ${fmtBoth(r.nextDeadlineAt, r.tz)}`)]);
+    return;
+  }
+
+  if (await attachPhotoToLastCheckin(trip, photoId, takenAt, PAIR_WINDOW_MS)) {
+    if (replyToken) await reply(replyToken, [textMsg('📷 已把照片附到剛才那筆打卡。')]);
+    return;
+  }
+
+  // 暫存，覆蓋舊的待配對照片
+  const old = (await pendingPhotosCol.doc(ownerUid).get()).data();
+  if (old) await deletePhoto(old.tripId, old.photoId);
+  await pendingPhotosCol.doc(ownerUid).set({
+    tripId: trip.id,
+    photoId,
+    takenAt: takenAt ? Timestamp.fromDate(takenAt) : null,
+    createdAt: Timestamp.now(),
+    expiresAt: Timestamp.fromMillis(Date.now() + PAIR_WINDOW_MS),
+  });
+  if (replyToken) await reply(replyToken, [textMsg('📷 已收到照片（LINE 傳送的圖片沒有位置資訊）。\n請在 15 分鐘內傳送「位置」，我會合成一筆含照片的打卡。')]);
 }
 
 /** 擁有者文字指令。回傳 true 表示已處理。 */
@@ -170,6 +258,10 @@ async function handleDirectEvent(ev: Event, userId: string): Promise<void> {
   const mev = ev as webhook.MessageEvent;
   if (mev.message.type === 'location') {
     await handleOwnerLocation(userId, mev);
+    return;
+  }
+  if (mev.message.type === 'image') {
+    await handleOwnerImage(userId, mev);
     return;
   }
   if (mev.message.type !== 'text' || !mev.replyToken) return;
@@ -249,6 +341,10 @@ async function handleEvent(ev: Event): Promise<void> {
   if (mev.message.type === 'location') {
     if (!isOwner) return;
     await handleOwnerLocation(ownerUid, mev);
+    return;
+  }
+  if (mev.message.type === 'image') {
+    if (isOwner) await handleOwnerImage(ownerUid, mev);
     return;
   }
 

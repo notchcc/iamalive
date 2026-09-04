@@ -10,7 +10,7 @@ import {
   type FirestoreDataConverter,
   type QueryDocumentSnapshot,
 } from 'firebase-admin/firestore';
-import type { ApiKey, BindCode, Checkin, GroupBinding, LineConfig, Trip, User, View } from './types.js';
+import type { ApiKey, BindCode, Checkin, GroupBinding, LineConfig, PendingPhoto, Trip, User, View } from './types.js';
 
 if (getApps().length === 0) initializeApp();
 
@@ -31,6 +31,7 @@ export const usersCol = db.collection('users').withConverter(typed<User>()) as C
 export const apiKeysCol = db.collection('apiKeys').withConverter(typed<ApiKey>()) as CollectionReference<ApiKey>;
 export const groupsCol = db.collection('groups').withConverter(typed<GroupBinding>()) as CollectionReference<GroupBinding>;
 export const bindCodesCol = db.collection('bindCodes').withConverter(typed<BindCode>()) as CollectionReference<BindCode>;
+export const pendingPhotosCol = db.collection('pendingPhotos').withConverter(typed<PendingPhoto>()) as CollectionReference<PendingPhoto>;
 
 export function checkinsCol(tripId: string): CollectionReference<Checkin> {
   return tripsCol.doc(tripId).collection('checkins').withConverter(typed<Checkin>()) as CollectionReference<Checkin>;

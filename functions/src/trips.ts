@@ -327,6 +327,21 @@ export async function deleteCheckin(snap: TripSnap, checkinId: string): Promise<
   await batch.commit();
 }
 
+/**
+ * 把照片附到最近一筆打卡（須在 withinMs 內且尚無照片）。成功回傳 true。
+ */
+export async function attachPhotoToLastCheckin(snap: TripSnap, photoId: string, takenAt: Date | null, withinMs: number): Promise<boolean> {
+  const q = await checkinsCol(snap.id).orderBy('createdAt', 'desc').limit(1).get();
+  if (q.empty) return false;
+  const doc = q.docs[0];
+  const c = doc.data();
+  if (c.photoId) return false;
+  if (Date.now() - c.createdAt.toMillis() > withinMs) return false;
+  await doc.ref.update({ photoId, takenAt: takenAt ? Timestamp.fromDate(takenAt) : (c.takenAt ?? null) });
+  await syncViews(snap.id, snap.data());
+  return true;
+}
+
 /** 重新產生 views 投影（資料結構升級後用）。 */
 export async function resyncTrip(snap: TripSnap): Promise<void> {
   await syncViews(snap.id, snap.data());

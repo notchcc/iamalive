@@ -331,6 +331,28 @@ async function main() {
   assert.equal(view.recent[0].note, '私訊補的備註', 'owner command works in DM');
   log('direct-message checkin + commands ok');
 
+  // 圖片訊息：無 GPS → 15 分鐘內剛打過卡 → 附到那筆
+  const JPEG_B64 = '/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AVN//2Q==';
+  const dmImage = (userId) => ({ type: 'message', replyToken: 'r', timestamp: Date.now(), source: { type: 'user', userId }, message: { id: `e2e:${JPEG_B64}`, type: 'image', contentProvider: { type: 'line' } } });
+  await webhookEvent(dmImage(A_UID));
+  view = (await db.doc(`views/${trip.groupReadToken}`).get()).data();
+  assert.ok(view.recent[0].photoId, 'photo attached to the recent checkin');
+  assert.equal((await fetch(`${BASE}/p/${trip.groupReadToken}/${view.recent[0].photoId}`)).status, 200);
+  // 再傳一張：最近一筆已有照片 → 進入待配對；接著傳位置 → 合成含照片的打卡
+  await webhookEvent(dmImage(A_UID));
+  let pend = (await db.doc(`pendingPhotos/${A_UID}`).get()).data();
+  assert.ok(pend?.photoId, 'second photo pending');
+  await webhookEvent(dmLocation(A_UID, 46.0207, 7.7491)); // Zermatt
+  view = (await db.doc(`views/${trip.groupReadToken}`).get()).data();
+  assert.equal(view.recent[0].src, 'photo');
+  assert.equal(view.recent[0].photoId, pend.photoId, 'pending photo paired with location');
+  assert.equal((await db.doc(`pendingPhotos/${A_UID}`).get()).exists, false, 'pending consumed');
+  // 過期清理
+  await db.doc(`pendingPhotos/${A_UID}`).set({ tripId: trip.id, photoId: 'zzzzzzzzzzzz', takenAt: null, createdAt: Timestamp.now(), expiresAt: Timestamp.fromMillis(Date.now() - 1000) });
+  const { purgeExpiredPendingPhotos } = await import(resolve(fnDir, 'lib/overdue.js'));
+  assert.equal(await purgeExpiredPendingPhotos(), 1);
+  log('image message pairing ok');
+
   // 重綁另一個群組會解除舊群組
   r = await call('POST', '/line/bind-code', undefined, sessA);
   const G2 = 'C' + 'b'.repeat(32);

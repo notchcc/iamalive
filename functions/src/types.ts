@@ -128,3 +128,12 @@ export interface BindCode {
 }
 
 export type PushKind = 'start' | 'end' | 'offline' | 'alert' | 'recovery';
+
+/** pendingPhotos/{uid}：等待配對位置的照片（15 分鐘）。 */
+export interface PendingPhoto {
+  tripId: string;
+  photoId: string;
+  takenAt: Timestamp | null;
+  createdAt: Timestamp;
+  expiresAt: Timestamp;
+}

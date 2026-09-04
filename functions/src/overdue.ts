@@ -3,7 +3,8 @@
  */
 import { logger } from 'firebase-functions/v2';
 import { familyUrl } from './config.js';
-import { Timestamp, tripsCol } from './db.js';
+import { Timestamp, pendingPhotosCol, tripsCol } from './db.js';
+import { deletePhoto } from './photos.js';
 import { alertMessages, pushGroup } from './line.js';
 import { decideOverdue, type OverdueState } from './overdue-logic.js';
 import { endTrip, syncViews } from './trips.js';
@@ -24,7 +25,19 @@ function toState(t: Trip): OverdueState {
   };
 }
 
+/** 刪除過期的待配對照片（含 bucket 物件）。 */
+export async function purgeExpiredPendingPhotos(now = new Date()): Promise<number> {
+  const q = await pendingPhotosCol.where('expiresAt', '<', Timestamp.fromDate(now)).limit(50).get();
+  for (const d of q.docs) {
+    const p = d.data();
+    await deletePhoto(p.tripId, p.photoId);
+    await d.ref.delete();
+  }
+  return q.size;
+}
+
 export async function runOverdueScan(now = new Date()): Promise<{ scanned: number; alerts: number; completed: number }> {
+  await purgeExpiredPendingPhotos(now).catch(() => 0);
   const snap = await tripsCol
     .where('status', '==', 'active')
     .where('nextDeadlineAt', '<=', Timestamp.fromDate(now))

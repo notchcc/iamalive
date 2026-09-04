@@ -68,6 +68,27 @@ export async function pushGroup(ownerUid: string, kind: PushKind, messages: Mess
   }
 }
 
+/**
+ * 下載使用者傳給官方帳號的圖片內容。emulator 下支援 `e2e:<base64>` 假 messageId 以便測試。
+ */
+export async function downloadMessageContent(messageId: string, maxBytes: number): Promise<{ data: Buffer; contentType: string } | null> {
+  if (process.env.FUNCTIONS_EMULATOR === 'true' && messageId.startsWith('e2e:')) {
+    return { data: Buffer.from(messageId.slice(4), 'base64'), contentType: 'image/jpeg' };
+  }
+  const res = await fetch(`https://api-data.line.me/v2/bot/message/${encodeURIComponent(messageId)}/content`, {
+    headers: { Authorization: `Bearer ${LINE_CHANNEL_ACCESS_TOKEN.value()}` },
+  });
+  if (!res.ok) {
+    logger.warn('downloadMessageContent failed', { status: res.status });
+    return null;
+  }
+  const len = Number(res.headers.get('content-length') ?? 0);
+  if (len > maxBytes) return null;
+  const data = Buffer.from(await res.arrayBuffer());
+  if (data.length > maxBytes) return null;
+  return { data, contentType: res.headers.get('content-type') ?? 'image/jpeg' };
+}
+
 export async function reply(replyToken: string, messages: Message[]): Promise<void> {
   try {
     await client().replyMessage({ replyToken, messages: messages.slice(0, 5) });
