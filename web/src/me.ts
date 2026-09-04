@@ -67,6 +67,7 @@ export function renderMePage(root: HTMLElement): () => void {
         PHOTO_REQUIRED: '沒有收到照片',
         UNSUPPORTED_IMAGE_TYPE: '不支援的圖片格式',
         FILE_TOO_LARGE: '照片超過 8 MB',
+        CHECKIN_NOT_FOUND: '找不到這筆打卡',
       };
       return map[e.code] ?? e.message;
     }
@@ -163,7 +164,20 @@ export function renderMePage(root: HTMLElement): () => void {
           toast(errText(err), 'err');
         }
       });
-      familyCleanup = renderFamilyPage(root.querySelector<HTMLElement>('#family-embed')!, t.groupReadToken);
+      familyCleanup = renderFamilyPage(root.querySelector<HTMLElement>('#family-embed')!, t.groupReadToken, {
+        onDelete: async (it) => {
+          if (!it.id) return;
+          const what = `${it.note ? `「${it.note}」` : '這筆打卡'}${it.photoId ? '（含照片）' : ''}`;
+          if (!confirm(`刪除 ${what}？此動作無法復原。`)) return;
+          try {
+            await api.deleteCheckin(t.id, it.id);
+            toast('已刪除');
+            await load();
+          } catch (e) {
+            toast(errText(e), 'err');
+          }
+        },
+      });
     }
   };
 

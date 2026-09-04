@@ -41,3 +41,12 @@ export async function readPhoto(tripId: string, photoId: string): Promise<{ data
   const [data] = await file.download();
   return { data, contentType: String(meta.contentType ?? 'image/jpeg') };
 }
+
+/** 刪除照片；不存在時靜默。 */
+export async function deletePhoto(tripId: string, photoId: string): Promise<void> {
+  try {
+    await bucket().file(objectPath(tripId, photoId)).delete({ ignoreNotFound: true });
+  } catch {
+    /* 忽略：照片遺失不應阻止刪除紀錄 */
+  }
+}

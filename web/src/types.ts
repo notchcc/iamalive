@@ -3,6 +3,7 @@ import type { Timestamp } from 'firebase/firestore';
 export type CheckinSource = 'shortcut' | 'line' | 'web-gps' | 'manual' | 'photo';
 
 export interface RecentItem {
+  id?: string;
   lat: number;
   lng: number;
   acc: number | null;

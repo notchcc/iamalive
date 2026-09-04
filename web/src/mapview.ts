@@ -121,7 +121,13 @@ function popupHtml(it: RecentItem, photoUrl?: PhotoUrlFn): string {
   }<br><small>${SOURCE_LABEL[it.src]} · ${accuracyText(it)}</small>`;
 }
 
-export function renderTimeline(el: HTMLElement, items: RecentItem[], now = new Date(), photoUrl?: PhotoUrlFn): void {
+export interface TimelineOpts {
+  photoUrl?: PhotoUrlFn;
+  /** 提供時每張卡片顯示「刪除」鈕（僅 /me 使用）。 */
+  onDelete?: (item: RecentItem) => void;
+}
+
+export function renderTimeline(el: HTMLElement, items: RecentItem[], now = new Date(), photoUrl?: PhotoUrlFn, opts: TimelineOpts = {}): void {
   if (!items.length) {
     el.innerHTML = '<p class="muted">尚無回報</p>';
     return;
@@ -141,8 +147,18 @@ export function renderTimeline(el: HTMLElement, items: RecentItem[], now = new D
         <div class="tl-place">📍 <b>${esc(placeText(it))}</b>
           <a class="coord" href="${mapsUrl(it)}" target="_blank" rel="noopener">${esc(coordText(it))}</a></div>
         <div class="tl-body">${it.note ? esc(it.note) : '<span class="muted">已報平安</span>'}</div>
-        <div class="tl-meta">${SOURCE_LABEL[it.src]} · ${esc(accuracyText(it))}</div>
+        <div class="tl-meta">${SOURCE_LABEL[it.src]} · ${esc(accuracyText(it))}${
+          opts.onDelete && it.id ? ` <button type="button" class="link danger tl-del" data-del="${esc(it.id)}">刪除</button>` : ''
+        }</div>
       </li>`;
     })
     .join('');
+  if (opts.onDelete) {
+    el.querySelectorAll<HTMLButtonElement>('[data-del]').forEach((b) =>
+      b.addEventListener('click', () => {
+        const it = items.find((x) => x.id === b.dataset.del);
+        if (it) opts.onDelete!(it);
+      }),
+    );
+  }
 }

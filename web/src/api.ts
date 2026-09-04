@@ -77,6 +77,7 @@ export const api = {
     }
     return (await res.json()) as { ok: true; photoId: string; nextDeadlineAt: string; tz: string; pushed: boolean; recovered: boolean };
   },
+  deleteCheckin: (id: string, checkinId: string) => call<{ ok: true }>('DELETE', `/trips/${id}/checkins/${checkinId}`),
   offline: (id: string, hours: number) =>
     call<{ ok: true; offlineUntil: string; nextDeadlineAt: string; pushed: boolean }>('POST', `/trips/${id}/offline`, { hours }),
   setFlights: (id: string, flights: FlightInput[]) => call<{ ok: true; flights: FlightJson[] }>('PUT', `/trips/${id}/flights`, { flights }),

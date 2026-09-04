@@ -6,6 +6,7 @@ import { randomBytes } from 'node:crypto';
 import tzlookup from 'tz-lookup';
 import { familyUrl } from './config.js';
 import { reverseGeocode } from './geocode.js';
+import { deletePhoto } from './photos.js';
 import { FieldValue, GeoPoint, Timestamp, checkinsCol, db, tripsCol, viewsCol, type TripSnap } from './db.js';
 import { endMessages, offlineMessages, pushGroup, recoveryMessages, startMessages } from './line.js';
 import { HOUR_MS, TAIPEI, isValidTz } from './time.js';
@@ -46,8 +47,9 @@ export async function requireActiveTrip(): Promise<TripSnap> {
   return t;
 }
 
-function recentFromCheckins(docs: Checkin[]): RecentItem[] {
-  return docs.map((c) => ({
+function recentFromCheckins(docs: Array<{ id: string; data: Checkin }>): RecentItem[] {
+  return docs.map(({ id, data: c }) => ({
+    id,
     lat: c.geo.latitude,
     lng: c.geo.longitude,
     acc: c.accuracy,
@@ -63,7 +65,7 @@ function recentFromCheckins(docs: Checkin[]): RecentItem[] {
 
 async function loadRecent(tripId: string, limit = RECENT_LIMIT): Promise<RecentItem[]> {
   const q = await checkinsCol(tripId).orderBy('createdAt', 'desc').limit(limit).get();
-  return recentFromCheckins(q.docs.map((d) => d.data()));
+  return recentFromCheckins(q.docs.map((d) => ({ id: d.id, data: d.data() })));
 }
 
 export function buildView(tripId: string, trip: Trip, label: string, recent: RecentItem[]): View {
@@ -207,10 +209,11 @@ export async function recordCheckin(snap: TripSnap, input: CheckinInput): Promis
   const updated: Trip = { ...trip, ...patch };
 
   const prior = await loadRecent(snap.id, RECENT_LIMIT - 1);
-  const recent = [...recentFromCheckins([checkin]), ...prior];
+  const checkinRef = checkinsCol(snap.id).doc();
+  const recent = [...recentFromCheckins([{ id: checkinRef.id, data: checkin }]), ...prior];
 
   const batch = db.batch();
-  batch.set(checkinsCol(snap.id).doc(), checkin);
+  batch.set(checkinRef, checkin);
   batch.update(snap.ref, patch);
   await syncViews(snap.id, updated, { recent, batch });
   await batch.commit();
@@ -298,6 +301,39 @@ export async function removeWatcher(snap: TripSnap, token: string): Promise<void
 export async function listWatchers(trip: Trip): Promise<Array<{ token: string; label: string; url: string }>> {
   const snaps = await Promise.all(trip.readTokens.map((t) => viewsCol.doc(t).get()));
   return snaps.map((s) => ({ token: s.id, label: s.data()?.label ?? '家人', url: familyUrl(s.id) }));
+}
+
+/**
+ * 刪除單筆打卡（含照片）。以剩餘最新一筆重算最後回報欄位；nextDeadlineAt 不變。
+ */
+export async function deleteCheckin(snap: TripSnap, checkinId: string): Promise<void> {
+  const ref = checkinsCol(snap.id).doc(checkinId);
+  const doc = await ref.get();
+  if (!doc.exists) throw new HttpError(404, 'CHECKIN_NOT_FOUND');
+  const c = doc.data()!;
+  await ref.delete();
+  if (c.photoId) await deletePhoto(snap.id, c.photoId);
+
+  const trip = snap.data();
+  const latestQ = await checkinsCol(snap.id).orderBy('createdAt', 'desc').limit(1).get();
+  const latest = latestQ.empty ? null : latestQ.docs[0].data();
+  const patch: Partial<Trip> = {
+    lastCheckinAt: latest ? latest.createdAt : null,
+    lastCheckinGeo: latest ? latest.geo : null,
+    lastCheckinPlace: latest ? (latest.place ?? null) : null,
+    travelerTz: latest ? latest.tz : TAIPEI,
+    updatedAt: Timestamp.now(),
+  };
+  const updated: Trip = { ...trip, ...patch };
+  const batch = db.batch();
+  batch.update(snap.ref, patch);
+  await syncViews(snap.id, updated, { batch });
+  await batch.commit();
+}
+
+/** 重新產生 views 投影（資料結構升級後用）。 */
+export async function resyncTrip(snap: TripSnap): Promise<void> {
+  await syncViews(snap.id, snap.data());
 }
 
 /** 「備註 xxx」指令：補到最後一筆打卡。 */

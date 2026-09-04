@@ -4,7 +4,7 @@
 import { doc, onSnapshot } from 'firebase/firestore';
 import { firestore } from './firebase';
 import { currentFlight, effectiveDeadline, nextFlight, toWindows } from './flights';
-import { TrackLayer, createMap, placeText, renderTimeline } from './mapview';
+import { TrackLayer, createMap, placeText, renderTimeline, type TimelineOpts } from './mapview';
 import { TAIPEI, fmtAgo, fmtBoth, fmtClock, fmtDate, fmtDateTime, fmtHours, sameAsTaipei, tzLabel, utcOffset } from './time';
 import type { View } from './types';
 
@@ -18,7 +18,7 @@ function cityTz(city: string, tz: string): string {
   return label === city ? esc(city) : `${esc(city)} <small>(${esc(label)})</small>`;
 }
 
-export function renderFamilyPage(root: HTMLElement, token: string): () => void {
+export function renderFamilyPage(root: HTMLElement, token: string, tlOpts: TimelineOpts = {}): () => void {
   root.innerHTML = `
     <div class="page family">
       <header class="clocks" id="clocks"></header>
@@ -137,7 +137,7 @@ export function renderFamilyPage(root: HTMLElement, token: string): () => void {
     renderFlights();
     track.render(view.recent, { fit: firstFit, photoUrl });
     firstFit = false;
-    renderTimeline(timelineEl, view.recent, new Date(), photoUrl);
+    renderTimeline(timelineEl, view.recent, new Date(), photoUrl, tlOpts);
     document.title = `${view.title} · iamalive`;
   };
 
@@ -147,7 +147,7 @@ export function renderFamilyPage(root: HTMLElement, token: string): () => void {
     renderStatus();
   }, 1000);
   const agoTimer = window.setInterval(() => {
-    if (view) renderTimeline(timelineEl, view.recent, new Date(), photoUrl);
+    if (view) renderTimeline(timelineEl, view.recent, new Date(), photoUrl, tlOpts);
   }, 60_000);
 
   const unsub = onSnapshot(

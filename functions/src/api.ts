@@ -12,7 +12,9 @@ import {
   HttpError,
   addWatcher,
   createTrip,
+  deleteCheckin,
   endTrip,
+  resyncTrip,
   getActiveTrip,
   listWatchers,
   recordCheckin,
@@ -336,6 +338,24 @@ export function createApp(): express.Express {
       const trip = await requireTrip(req.params.id);
       const out = await endTrip(trip, '旅行者已手動結案');
       res.json({ ok: true, pushed: out.pushed });
+    }),
+  );
+
+  r.delete(
+    '/trips/:id/checkins/:checkinId',
+    wrap(async (req, res) => {
+      const trip = await requireTrip(req.params.id, false);
+      await deleteCheckin(trip, String(req.params.checkinId));
+      res.json({ ok: true });
+    }),
+  );
+
+  r.post(
+    '/trips/:id/resync',
+    wrap(async (req, res) => {
+      const trip = await requireTrip(req.params.id, false);
+      await resyncTrip(trip);
+      res.json({ ok: true });
     }),
   );
 

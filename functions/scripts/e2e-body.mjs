@@ -172,6 +172,20 @@ async function main() {
     fd3.append('photo', new Blob(['hi'], { type: 'text/plain' }), 'x.txt');
     assert.equal((await fetch(`${BASE}/checkin/photo`, { method: 'POST', headers: { 'x-write-token': TOKEN }, body: fd3 })).status, 415);
     log('photo checkin + photo serving ok');
+
+    // 刪除該筆打卡：紀錄消失、照片 404、view 更新、最後回報退回前一筆、期限不變
+    const before = (await db.doc(`trips/${trip.id}`).get()).data();
+    const delRes = await call('DELETE', `/trips/${trip.id}/checkins/${view.recent[0].id}`);
+    assert.equal(delRes.status, 200, JSON.stringify(delRes.json));
+    view = (await db.doc(`views/${trip.groupReadToken}`).get()).data();
+    assert.equal(view.recent.length, 2);
+    assert.ok(view.recent.every((x) => x.id && x.photoId == null));
+    assert.equal((await fetch(`${BASE}/p/${trip.groupReadToken}/${j0.photoId}`)).status, 404, 'photo removed');
+    const after = (await db.doc(`trips/${trip.id}`).get()).data();
+    assert.equal(after.travelerTz, 'Asia/Tokyo', 'last fields recomputed from previous checkin');
+    assert.equal(after.nextDeadlineAt.toMillis(), before.nextDeadlineAt.toMillis(), 'deadline unchanged');
+    assert.equal((await call('DELETE', `/trips/${trip.id}/checkins/nope`)).status, 404);
+    log('delete checkin (with photo) ok');
   }
 
   // 驗證錯誤
@@ -197,7 +211,7 @@ async function main() {
   assert.equal(r.json.length, 2);
   view = (await db.doc(`views/${momToken}`).get()).data();
   assert.equal(view.label, '媽媽');
-  assert.equal(view.recent.length, 3, 'new watcher gets existing history');
+  assert.equal(view.recent.length, 2, 'new watcher gets existing history');
   r = await call('DELETE', `/trips/${trip.id}/watchers/${momToken}`);
   assert.equal(r.status, 200);
   assert.equal((await db.doc(`views/${momToken}`).get()).exists, false);

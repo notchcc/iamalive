@@ -60,6 +60,8 @@ export interface Checkin {
 }
 
 export interface RecentItem {
+  /** checkin 文件 ID，供 /me 刪除用。 */
+  id: string;
   lat: number;
   lng: number;
   acc: number | null;
