@@ -461,9 +461,10 @@ export function renderMePage(root: HTMLElement): () => void {
         lookupOut.innerHTML = '<p class="muted">查不到這個航班。確認班號與出發日期，或改用下方手動輸入。</p>';
         return;
       }
-      lookupOut.innerHTML = `<ul class="legs">${legs
+      const otherDay = legs.some((l) => !l.departLocal.startsWith(date));
+      lookupOut.innerHTML = `${otherDay ? '<p class="muted small">灰色未勾選的是其他日期出發的班次，需要再自行勾選。</p>' : ''}<ul class="legs">${legs
         .map(
-          (l, i) => `<li><label class="leg-pick"><input type="checkbox" data-leg="${i}" checked />
+          (l, i) => `<li><label class="leg-pick"><input type="checkbox" data-leg="${i}"${l.departLocal.startsWith(date) ? ' checked' : ''} />
             <span><b>${esc(l.flightNo)}</b> ${esc(l.airline ?? '')}<br>
             ${esc(l.fromCity)}（${esc(l.fromIata)}）${esc(l.departLocal.replace('T', ' '))} → ${esc(l.toCity)}（${esc(l.toIata)}）${esc(l.arriveLocal.replace('T', ' '))}
             <small class="muted">各地當地時間 · ${esc(l.fromTz)} → ${esc(l.toTz)}</small></span></label></li>`,
