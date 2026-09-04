@@ -1,5 +1,5 @@
 /**
- * /me 管理頁：寫入 token、狀態、建立/結束行程、備援打卡（定位或手動選點）、預告離線、家人連結。
+ * /me 管理頁，分三個頁籤：打卡（備援打卡、照片打卡、家人頁預覽）、行程管理（建立/結束、航段、預告離線、家人連結）、參數設定（群組綁定、捷徑金鑰、帳號）。
  */
 import L from 'leaflet';
 import { ApiError, api } from './api';
@@ -110,6 +110,17 @@ export function renderMePage(root: HTMLElement): () => void {
     }
   };
 
+  type Tab = 'checkin' | 'trip' | 'settings';
+  const TABS: Array<[Tab, string]> = [
+    ['checkin', '打卡'],
+    ['trip', '行程管理'],
+    ['settings', '參數設定'],
+  ];
+  const tabFromHash = (): Tab | null => {
+    const h = location.hash.replace(/^#/, '');
+    return TABS.some(([k]) => k === h) ? (h as Tab) : null;
+  };
+
   const renderMain = (): void => {
     if (!status) return;
     familyCleanup?.();
@@ -120,43 +131,113 @@ export function renderMePage(root: HTMLElement): () => void {
     picked = null;
 
     const t = status.activeTrip;
+    const u = status.user;
     root.innerHTML = `
       <div class="page me">
         <h1>iamalive 管理
-          <span class="who">${status.user.pictureUrl ? `<img class="avatar" src="${esc(status.user.pictureUrl)}" alt="" />` : ''}${esc(status.user.displayName ?? status.user.uid)}
-          <button id="logout" class="link">登出</button></span></h1>
+          <span class="who">${u.pictureUrl ? `<img class="avatar" src="${esc(u.pictureUrl)}" alt="" />` : ''}${esc(u.displayName ?? u.uid)}</span></h1>
 
-        <section class="card">
-          <h2>家人 LINE 群組</h2>
-          ${
-            status.groupBound
-              ? `<div><b class="ok-text">已綁定</b> <button id="unbind" class="link danger">解除綁定</button></div>`
-              : `<div><b class="bad-text">尚未綁定</b></div>
-                 <ol class="steps">
-                   <li>把官方帳號 <b>@574stmif</b>（iamalive）邀請進家人群組</li>
-                   <li>按下方按鈕取得 6 位數綁定碼</li>
-                   <li>由你本人在群組輸入「綁定 123456」</li>
-                 </ol>
-                 <div class="row"><button id="bind-code">產生綁定碼</button><span id="bind-code-out" class="bind-code"></span></div>`
-          }
-          <div class="muted small">本月推播 ${status.pushCount} / ${status.monthlyQuota}（${esc(status.monthKey)}，所有使用者共用）</div>
-        </section>
+        <nav class="tabs" role="tablist">
+          ${TABS.map(([k, label]) => `<button type="button" role="tab" data-tab="${k}" aria-selected="false">${label}</button>`).join('')}
+        </nav>
 
-        <section class="card">
-          <h2>捷徑金鑰 <span class="muted">給 iOS 捷徑用的 X-Api-Key</span></h2>
-          <ul id="keys" class="key-list"></ul>
-          <form id="add-key" class="row"><input name="label" placeholder="標籤（如 iPhone 15）" maxlength="30" required /><button>產生金鑰</button></form>
-          <div id="new-key" hidden></div>
-        </section>
-
-        ${t ? renderTripSection(t) : renderCreateSection()}
-
-        ${t ? `<section class="card"><h2>家人連結</h2><ul id="watchers"></ul>
-          <form id="add-watcher" class="row"><input name="label" placeholder="稱呼（如 媽媽）" maxlength="20" required /><button>新增連結</button></form></section>` : ''}
-
-        ${t ? `<section class="card"><h2>家人頁預覽</h2><div id="family-embed"></div></section>` : ''}
+        <section class="pane" data-pane="checkin" hidden>${t ? renderCheckinPane(t) : renderNoTripHint()}</section>
+        <section class="pane" data-pane="trip" hidden>${t ? renderTripPane(t) : renderCreateSection()}</section>
+        <section class="pane" data-pane="settings" hidden>${renderSettingsPane()}</section>
       </div>`;
 
+    // ---- 頁籤 ----
+    const panes = [...root.querySelectorAll<HTMLElement>('.pane')];
+    const tabBtns = [...root.querySelectorAll<HTMLButtonElement>('[data-tab]')];
+    const showTab = (k: Tab): void => {
+      panes.forEach((p) => (p.hidden = p.dataset.pane !== k));
+      tabBtns.forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === k)));
+      history.replaceState(null, '', `#${k}`);
+      // 家人頁預覽（含 Leaflet 地圖）等到頁籤可見才掛載，避免在 display:none 下量到 0 尺寸
+      if (k === 'checkin' && t && !familyCleanup) mountFamilyEmbed(t);
+      window.dispatchEvent(new Event('resize'));
+    };
+    tabBtns.forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab as Tab)));
+    root.querySelectorAll<HTMLButtonElement>('[data-goto]').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.goto as Tab)));
+
+    bindSettingsPane();
+    if (t) {
+      bindTripSection(t);
+      renderWatchers(t);
+      root.querySelector<HTMLFormElement>('#add-watcher')!.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const fd = new FormData(e.currentTarget as HTMLFormElement);
+        try {
+          await api.addWatcher(t.id, String(fd.get('label')));
+          watchers = await api.watchers(t.id);
+          renderWatchers(t);
+          (e.target as HTMLFormElement).reset();
+        } catch (err) {
+          toast(errText(err), 'err');
+        }
+      });
+    } else {
+      bindCreateSection();
+    }
+
+    showTab(tabFromHash() ?? (t ? 'checkin' : 'trip'));
+  };
+
+  const mountFamilyEmbed = (t: TripJson): void => {
+    familyCleanup = renderFamilyPage(root.querySelector<HTMLElement>('#family-embed')!, t.groupReadToken, {
+      onDelete: async (it) => {
+        if (!it.id) return;
+        const what = `${it.note ? `「${it.note}」` : '這筆打卡'}${it.photoId ? '（含照片）' : ''}`;
+        if (!confirm(`刪除 ${what}？此動作無法復原。`)) return;
+        try {
+          await api.deleteCheckin(t.id, it.id);
+          toast('已刪除');
+          await load();
+        } catch (e) {
+          toast(errText(e), 'err');
+        }
+      },
+    });
+  };
+
+  // ---- 參數設定頁籤：群組綁定、金鑰、帳號 ----
+  const renderSettingsPane = (): string => {
+    if (!status) return '';
+    const u = status.user;
+    return `
+      <section class="card">
+        <h2>家人 LINE 群組</h2>
+        ${
+          status.groupBound
+            ? `<div><b class="ok-text">已綁定</b> <button id="unbind" class="link danger">解除綁定</button></div>`
+            : `<div><b class="bad-text">尚未綁定</b></div>
+               <ol class="steps">
+                 <li>把官方帳號 <b>@574stmif</b>（iamalive）邀請進家人群組</li>
+                 <li>按下方按鈕取得 6 位數綁定碼</li>
+                 <li>由你本人在群組輸入「綁定 123456」</li>
+               </ol>
+               <div class="row"><button id="bind-code">產生綁定碼</button><span id="bind-code-out" class="bind-code"></span></div>`
+        }
+        <div class="muted small">本月推播 ${status.pushCount} / ${status.monthlyQuota}（${esc(status.monthKey)}，所有使用者共用）</div>
+      </section>
+
+      <section class="card">
+        <h2>捷徑金鑰 <span class="muted">給 iOS 捷徑用的 X-Api-Key</span></h2>
+        <ul id="keys" class="key-list"></ul>
+        <form id="add-key" class="row"><input name="label" placeholder="標籤（如 iPhone 15）" maxlength="30" required /><button>產生金鑰</button></form>
+        <div id="new-key" hidden></div>
+      </section>
+
+      <section class="card">
+        <h2>帳號</h2>
+        <div class="row">
+          <span>${u.pictureUrl ? `<img class="avatar" src="${esc(u.pictureUrl)}" alt="" /> ` : ''}${esc(u.displayName ?? u.uid)} <span class="muted small">（LINE 登入，保留 30 天）</span></span>
+          <button id="logout" class="secondary">登出</button>
+        </div>
+      </section>`;
+  };
+
+  const bindSettingsPane = (): void => {
     root.querySelector('#logout')!.addEventListener('click', async () => {
       await api.logout().catch(() => undefined);
       renderGate();
@@ -178,7 +259,6 @@ export function renderMePage(root: HTMLElement): () => void {
       }
     });
 
-    // ---- 金鑰 ----
     const renderKeys = (): void => {
       const ul = root.querySelector<HTMLElement>('#keys')!;
       ul.innerHTML = keys.length
@@ -229,42 +309,10 @@ export function renderMePage(root: HTMLElement): () => void {
         toast(errText(err), 'err');
       }
     });
-
-    if (t) bindTripSection(t);
-    else bindCreateSection();
-
-    if (t) {
-      renderWatchers(t);
-      root.querySelector<HTMLFormElement>('#add-watcher')!.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const fd = new FormData(e.currentTarget as HTMLFormElement);
-        try {
-          await api.addWatcher(t.id, String(fd.get('label')));
-          watchers = await api.watchers(t.id);
-          renderWatchers(t);
-          (e.target as HTMLFormElement).reset();
-        } catch (err) {
-          toast(errText(err), 'err');
-        }
-      });
-      familyCleanup = renderFamilyPage(root.querySelector<HTMLElement>('#family-embed')!, t.groupReadToken, {
-        onDelete: async (it) => {
-          if (!it.id) return;
-          const what = `${it.note ? `「${it.note}」` : '這筆打卡'}${it.photoId ? '（含照片）' : ''}`;
-          if (!confirm(`刪除 ${what}？此動作無法復原。`)) return;
-          try {
-            await api.deleteCheckin(t.id, it.id);
-            toast('已刪除');
-            await load();
-          } catch (e) {
-            toast(errText(e), 'err');
-          }
-        },
-      });
-    }
   };
 
-  const renderTripSection = (t: TripJson): string => {
+  // ---- 共用：行程摘要卡 ----
+  const renderTripSummary = (t: TripJson): string => {
     const now = new Date();
     const deadline = new Date(t.nextDeadlineAt);
     const offline = t.offlineUntil ? new Date(t.offlineUntil) : null;
@@ -276,7 +324,19 @@ export function renderMePage(root: HTMLElement): () => void {
         <div>下次期限：${esc(fmtBoth(deadline, t.travelerTz))} ${deadline < now ? '<b class="bad-text">已逾時</b>' : ''}</div>
         ${offline && offline > now ? `<div>✈️ 預告離線至 ${esc(fmtBoth(offline, t.travelerTz))}</div>` : ''}
         ${t.alerted ? `<div class="bad-text">⚠️ 已發出逾時警報 ${t.alertCount} 則</div>` : ''}
-      </section>
+      </section>`;
+  };
+
+  const renderNoTripHint = (): string => `
+      <section class="card">
+        <h2>打卡</h2>
+        <p class="muted">目前沒有進行中的行程，先到「行程管理」建立一趟。</p>
+        <button type="button" data-goto="trip">前往行程管理</button>
+      </section>`;
+
+  // ---- 打卡頁籤：摘要、備援打卡、照片打卡、家人頁預覽 ----
+  const renderCheckinPane = (t: TripJson): string => `
+      ${renderTripSummary(t)}
 
       <section class="card">
         <h2>備援打卡</h2>
@@ -307,6 +367,12 @@ export function renderMePage(root: HTMLElement): () => void {
         </div>
         <p class="muted small">上傳前會縮到 1600px。備註與「下次回報」欄位共用上方輸入。</p>
       </section>
+
+      <section class="card"><h2>家人頁預覽</h2><div id="family-embed"></div></section>`;
+
+  // ---- 行程管理頁籤：摘要、航段、預告離線、家人連結、結束行程 ----
+  const renderTripPane = (t: TripJson): string => `
+      ${renderTripSummary(t)}
 
       <section class="card">
         <h2>航段 <span class="muted">飛行中不警報，落地後 3 小時內回報</span></h2>
@@ -340,11 +406,13 @@ export function renderMePage(root: HTMLElement): () => void {
         <form id="offline" class="row"><input name="hours" type="number" min="1" max="168" value="16" required /><span>小時</span><button>送出</button></form>
       </section>
 
+      <section class="card"><h2>家人連結</h2><ul id="watchers"></ul>
+        <form id="add-watcher" class="row"><input name="label" placeholder="稱呼（如 媽媽）" maxlength="20" required /><button>新增連結</button></form></section>
+
       <section class="card">
         <h2>結束行程</h2>
         <button id="end" class="danger">結束並通知群組</button>
       </section>`;
-  };
 
   const bindTripSection = (t: TripJson): void => {
     const noteEl = root.querySelector<HTMLInputElement>('#note')!;
