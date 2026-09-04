@@ -17,7 +17,7 @@
 
 1. 旅行者（即開發者本人）一鍵打卡，兩秒內完成，不依賴任何 App 內瀏覽器。
 2. 家人點一條連結即可看到地圖與時間軸，**看**的動作零安裝、零登入。
-3. 逾時未打卡時，家人收到通知；持續未回報時升級為語音來電。
+3. 逾時未打卡時，家人收到推播；持續未回報時定期重複提醒，有次數上限。
 4. 長途飛行、無訊號路段可**預告離線**，避免假警報。
 
 ### 1.2 非目標
@@ -60,18 +60,18 @@
  │  Hosting ── 靜態 SPA、/api/** rewrite → Functions             │
  │                                            │                  │
  │  Cloud Functions (2nd gen, Node 22, asia-east1)               │
- │   · api            HTTP：checkin / trips / subscribe / twiml  │
+ │   · api            HTTP：checkin / trips / subscribe          │
  │   · checkOverdue   Scheduler：每 15 分鐘                       │
  │        │                                   │                  │
  │        ▼                                   │                  │
  │  Firestore ────────────────────────────────┘                  │
  │   trips / trips/{id}/checkins / views/{readToken} / subs      │
  │                                                               │
- │  Secret Manager：WRITE_TOKEN、VAPID、TWILIO                    │
- └───────────┬───────────────────────────┬───────────────────────┘
-             │ Web Push (VAPID)          │ Twilio Voice REST
-             ▼                           ▼
-      Apple / Google 推播中繼          Twilio → 家人電話
+ │  Secret Manager：WRITE_TOKEN、VAPID                           │
+ └───────────┬───────────────────────────────────────────────────┘
+             │ Web Push (VAPID)
+             ▼
+      Apple / Google 推播中繼 → 家人手機
 ```
 
 ### 2.1 技術選型
@@ -85,7 +85,6 @@
 | 資料庫 | Firestore (Native)，區域 `asia-east1` | 與 Functions 同區 |
 | 排程 | `onSchedule` (Cloud Scheduler) | 每 15 分鐘 |
 | 推播 | `web-push` npm（VAPID） | Node 環境可直接用 |
-| 語音 | Twilio Programmable Voice | 逾時升級用 |
 | 秘密 | Firebase Secret Manager (`defineSecret`) | 不放 Firestore、不進 repo |
 
 ---
@@ -118,7 +117,7 @@
 | `lastCheckinGeo` | geopoint \| null | 最後位置 |
 | `nextDeadlineAt` | timestamp | **下一個期限**，建立時 = `startAt + intervalHours`；每次打卡重算 |
 | `offlineUntil` | timestamp \| null | 預告離線至此時間，期間不警報 |
-| `alertLevel` | number | 目前警報等級 0/1/2，打卡後歸零 |
+| `alerted` | boolean | 本期限內是否已發過逾時警報，打卡後歸零 |
 | `alertCount` | number | 本期限內已發警報數，打卡後歸零 |
 | `lastAlertAt` | timestamp \| null | 上次警報時間 |
 | `readTokens` | array\<string\> | 此行程的家人 token 清單（方便反查） |
@@ -207,7 +206,6 @@ service cloud.firestore {
 | POST | `/api/w/:token/subscribe` | 家人訂閱推播 | 驗證 view 存在，upsert `subs`（以 endpoint 去重）。**不需寫入 token** |
 | GET | `/api/w/:token/manifest.webmanifest` | 動態 manifest | `start_url = /w/{token}`，見 §8 |
 | GET | `/api/w/:token/vapid` | 回傳 VAPID public key | |
-| POST | `/api/twiml/:tripId` | Twilio 來電語音內容 | 回傳 TwiML `<Say language="zh-TW">` |
 
 ### 5.1 `POST /api/checkin`
 
@@ -220,9 +218,9 @@ Response: { ok: true, nextDeadlineAt }
 2. 找 `status == active` 的行程（無則 409）。
 3. 在一個 batch 內：
    - 新增 `checkins` 文件；
-   - 更新 `trips`：`lastCheckinAt`、`lastCheckinGeo`、`nextDeadlineAt = now + (nextHours ?? intervalHours)`、`offlineUntil = null`、`alertLevel = 0`、`alertCount = 0`；
+   - 更新 `trips`：`lastCheckinAt`、`lastCheckinGeo`、`nextDeadlineAt = now + (nextHours ?? intervalHours)`、`offlineUntil = null`、`alerted = false`、`alertCount = 0`；
    - 更新該行程所有 `views/*` 的投影欄位與 `recent`（前插、截 100）。
-4. 若打卡前 `alertLevel > 0`（家人已被警報過），推播家人「已恢復回報」。
+4. 若打卡前 `alerted == true`（家人已被警報過），推播家人「已恢復回報」。
 
 ---
 
@@ -281,18 +279,14 @@ export const checkOverdue = onSchedule(
       const sinceLast = t.lastAlertAt
         ? (now.toMillis() - t.lastAlertAt.toMillis()) / 3600e3 : Infinity;
 
-      if (t.alertLevel === 0) {
+      if (!t.alerted) {
         await pushWatchers(doc, `尚未回報：已超過期限 ${fmt(overdueH)}`);
-        await doc.ref.update({ alertLevel: 1, alertCount: 1, lastAlertAt: now });
-      } else if (t.alertLevel === 1 && overdueH >= ESCALATE_AFTER_H /* 3 */) {
-        await pushWatchers(doc, `仍未回報：已超過 ${fmt(overdueH)}，即將致電`);
-        await callWatchers(doc);                       // Twilio
-        await doc.ref.update({ alertLevel: 2, alertCount: 2, lastAlertAt: now });
-      } else if (t.alertLevel === 2 && sinceLast >= REPEAT_H /* 6 */ && t.alertCount < MAX_ALERTS /* 4 */) {
+        await doc.ref.update({ alerted: true, alertCount: 1, lastAlertAt: now });
+      } else if (sinceLast >= REPEAT_H /* 3 */ && t.alertCount < MAX_ALERTS /* 4 */) {
         await pushWatchers(doc, `仍未回報：已超過 ${fmt(overdueH)}`);
         await doc.ref.update({ alertCount: t.alertCount + 1, lastAlertAt: now });
       }
-      // 達上限後停止，直到下一次打卡把 alertLevel 歸零
+      // 達上限後停止，直到下一次打卡把 alerted 歸零
     }
   });
 ```
@@ -300,8 +294,7 @@ export const checkOverdue = onSchedule(
 | 參數 | 預設 | 說明 |
 |---|---|---|
 | 掃描頻率 | 15 分鐘 | 實際延遲 ≤ 15 分鐘 |
-| `ESCALATE_AFTER_H` | 3 | 逾時多久後升級語音來電 |
-| `REPEAT_H` | 6 | 升級後重複推播間隔 |
+| `REPEAT_H` | 3 | 重複推播間隔 |
 | `MAX_ALERTS` | 4 | 單一期限內警報總數上限 |
 | 自動結案 | `endAt + 24h` | 避免忘記結案後永久警報 |
 
@@ -339,23 +332,20 @@ export const checkOverdue = onSchedule(
 ### 8.4 iOS 已知限制（接受）
 
 - 僅加到主畫面後可推播（iOS 16.4+），LINE 內建瀏覽器無法安裝。
-- 無自訂鈴聲、無重要警示；睡眠專注模式會靜音推播，故 Level 2 用語音來電，並請家人將 Twilio 號碼加入「最愛」以穿透勿擾。
+- 無自訂鈴聲、無重要警示；睡眠專注模式會靜音推播，凌晨的逾時警報可能到早上才被看到。這是已接受的限制；若要穿透勿擾，家人需在專注模式中將此 Web App 加入允許清單。
 - 刪除主畫面圖示即失去訂閱，後端收到 404/410 時刪除 `subs`。
 
 ---
 
 ## 9. 通知管道
 
-| 等級 | 管道 | 觸發 |
+| 類型 | 管道 | 觸發 |
 |---|---|---|
-| 0 | 頁面即時更新 | 每次打卡（onSnapshot） |
+| 狀態 | 頁面即時更新 | 每次打卡（onSnapshot） |
 | 資訊 | Web Push | 預告離線、恢復回報、行程結案 |
-| 1 | Web Push | 逾時 |
-| 2 | Web Push + Twilio 語音 | 逾時超過 `ESCALATE_AFTER_H` |
+| 警報 | Web Push | 逾時，之後每 `REPEAT_H` 小時重複，最多 `MAX_ALERTS` 次 |
 
 - Web Push：`web-push` 套件，VAPID 金鑰以 Secret 儲存；每個 `subs` 逐一發送，失敗記 `failures`，404/410 刪除。
-- Twilio：`POST /2010-04-01/Accounts/{sid}/Calls.json`，`Url` 指向 `/api/twiml/:tripId`，TwiML 內容為中文語音「XXX 已超過 N 小時未回報，最後位置在 …」。家人電話號碼以 Secret（`WATCHER_PHONES`，JSON）儲存，不放 Firestore。
-- 需確認 Twilio 對台灣號碼的撥打與來電顯示要求。
 
 ---
 
@@ -392,10 +382,6 @@ export const checkOverdue = onSchedule(
 firebase functions:secrets:set WRITE_TOKEN
 firebase functions:secrets:set VAPID_PUBLIC_KEY
 firebase functions:secrets:set VAPID_PRIVATE_KEY
-firebase functions:secrets:set TWILIO_ACCOUNT_SID
-firebase functions:secrets:set TWILIO_AUTH_TOKEN
-firebase functions:secrets:set TWILIO_FROM
-firebase functions:secrets:set WATCHER_PHONES      # JSON: {"媽媽":"+8869..."}
 ```
 
 ### 10.3 Functions 設定
@@ -414,9 +400,8 @@ firebase functions:secrets:set WATCHER_PHONES      # JSON: {"媽媽":"+8869..."}
 | Functions | 排程 2,880 次/月 + 打卡數十次 | 免費額度內 |
 | Hosting | < 1 GB | 免費額度內 |
 | Cloud Scheduler | 1 個 job | 免費（3 個內） |
-| Secret Manager | 7 個 secret，每次冷啟動存取 | 免費額度內 |
+| Secret Manager | 3 個 secret，每次冷啟動存取 | 免費額度內 |
 | Web Push | — | 0 |
-| Twilio 語音 | 僅逾時升級時 | 每通數元台幣 |
 | 地圖圖磚 | MapTiler 免費層 | 0 |
 
 設定 GCP 預算告警（如每月 NT$100）以防意外。
@@ -427,13 +412,13 @@ firebase functions:secrets:set WATCHER_PHONES      # JSON: {"媽媽":"+8869..."}
 
 | 風險 | 對策 |
 |---|---|
-| 家人裝不起 PWA | 當面協助安裝一次；未安裝仍可看頁面；語音來電不依賴安裝 |
-| 夜間推播被靜音 | Level 2 語音來電；家人將號碼設為最愛 |
+| 家人裝不起 PWA | 當面協助安裝一次；未安裝仍可看頁面，但收不到警報 |
+| 夜間推播被靜音 | 已接受；重複推播至早上仍會看到；家人可將 Web App 加入專注模式允許清單 |
 | 飛行 / 無訊號造成假警報 | 打卡時預告 `nextHours`；`/offline` 端點 |
 | 忘記結案 | `endAt + 24h` 自動結案 |
 | 讀取 token 外流 | 可個別撤銷；`Referrer-Policy`；無副作用 GET |
 | 寫入 token 外流 | 換 Secret 重新部署；捷徑內 token 不會顯示於分享 |
-| 排程重複觸發 | `alertLevel` / `lastAlertAt` 狀態機保證冪等 |
+| 排程重複觸發 | `alerted` / `lastAlertAt` 狀態機保證冪等 |
 | Functions 冷啟動 | 捷徑背景執行不影響體驗；`/me` 備援頁顯示送出中狀態 |
 
 ---
@@ -446,17 +431,17 @@ firebase functions:secrets:set WATCHER_PHONES      # JSON: {"媽媽":"+8869..."}
 | 2 | `api` Function：trips / checkin / watchers / subscribe / manifest | 1 天 |
 | 3 | 家人頁：onSnapshot、地圖、時間軸、環境偵測、SW、推播訂閱 | 1 天 |
 | 4 | `/me` 管理頁 + iOS 捷徑 | 0.5 天 |
-| 5 | `checkOverdue` 狀態機 + Web Push + Twilio | 0.5 天 |
-| 6 | 實機測試：iPhone 安裝流程、睡眠模式下推播、來電 | 0.5 天 |
+| 5 | `checkOverdue` 狀態機 + Web Push | 0.5 天 |
+| 6 | 實機測試：iPhone 安裝流程、睡眠模式下推播 | 0.5 天 |
 
 ### 13.1 驗證清單
 
 - [ ] 捷徑從鎖定畫面一鍵打卡，家人頁 3 秒內更新
 - [ ] 從 LINE 點連結 → 提示用 Safari 開啟 → 加到主畫面 → 開啟通知，全程有引導
 - [ ] 加到主畫面後開啟仍帶 token
-- [ ] 手動把 `nextDeadlineAt` 改成過去，15 分鐘內收到 Level 1 推播
-- [ ] 3 小時後收到來電（測試時可暫調 `ESCALATE_AFTER_H`）
-- [ ] 打卡後 `alertLevel` 歸零並收到「已恢復回報」
+- [ ] 手動把 `nextDeadlineAt` 改成過去，15 分鐘內收到逾時推播
+- [ ] `REPEAT_H` 後收到重複推播，達 `MAX_ALERTS` 後停止（測試時可暫調參數）
+- [ ] 打卡後 `alerted` 歸零並收到「已恢復回報」
 - [ ] 預告離線 16 小時，期間排程不警報
 - [ ] 刪除主畫面圖示後，後端下次推送自動清除該訂閱
 - [ ] 撤銷某位家人 token 後，其頁面 onSnapshot 收到文件不存在
@@ -467,7 +452,7 @@ firebase functions:secrets:set WATCHER_PHONES      # JSON: {"媽媽":"+8869..."}
 
 | # | 項目 |
 |---|---|
-| 1 | `ESCALATE_AFTER_H` 與 `MAX_ALERTS` 的實際值，需與家人溝通後定 |
+| 1 | `REPEAT_H` 與 `MAX_ALERTS` 的實際值，需與家人溝通後定 |
 | 2 | 家人是否都是 iPhone（影響安裝引導文案與 Declarative Web Push 覆蓋率） |
 | 3 | 是否需要 Android 端捷徑（Tasker）或只用 `/me` 備援 |
 | 4 | 打卡紀錄是否要保留期限（個人用，可先不設 TTL） |
