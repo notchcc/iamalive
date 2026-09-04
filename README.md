@@ -76,9 +76,12 @@ firebase deploy
 ## 開發
 
 ```bash
-cd functions && npm run typecheck && npm test
+cd functions && npm run typecheck && npm test   # 純函式單元測試
+cd functions && npm run e2e                      # emulator 端到端（需 Java 與 firebase CLI）
 cd web && npm run typecheck && npm run build
 firebase emulators:start        # Functions + Firestore + Hosting（需先 build）
 ```
+
+`npm run e2e` 會在離線的 demo 專案上跑完整 API 流程與逾時狀態機，首次執行會產生 `functions/.secret.local`（測試用假值，已 gitignore）。
 
 `checkOverdue` 的決策邏輯在 `functions/src/overdue-logic.ts`，為純函式，測試在 `functions/test/`。

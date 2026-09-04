@@ -2,14 +2,17 @@
   "name": "iamalive-functions",
   "private": true,
   "type": "module",
-  "engines": { "node": "22" },
+  "engines": {
+    "node": "22"
+  },
   "main": "lib/index.js",
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "serve": "npm run build && firebase emulators:start --only functions,firestore",
-    "deploy": "firebase deploy --only functions"
+    "deploy": "firebase deploy --only functions",
+    "e2e": "npm run build && node scripts/e2e.mjs"
   },
   "dependencies": {
     "@line/bot-sdk": "^11.2.0",
