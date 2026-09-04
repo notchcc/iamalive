@@ -6,6 +6,7 @@ lib/
 .env
 .env.*
 !.env.example
+!web/.env.production
 firebase-debug.log
 ui-debug.log
 .DS_Store
