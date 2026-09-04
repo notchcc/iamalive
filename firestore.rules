@@ -1,0 +1,14 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 家人頁：知道 readToken 即可讀取單一投影文件；禁止列舉、禁止寫入。
+    match /views/{readToken} {
+      allow get: if true;
+      allow list, write: if false;
+    }
+    // 其餘集合只允許 Admin SDK（Cloud Functions）存取。
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

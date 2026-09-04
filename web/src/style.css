@@ -1,0 +1,87 @@
+:root {
+  --bg: #f6f7f8;
+  --card: #ffffff;
+  --text: #111827;
+  --muted: #6b7280;
+  --line: #e5e7eb;
+  --brand: #0f766e;
+  --brand-soft: #ccfbf1;
+  --ok: #047857;
+  --ok-soft: #d1fae5;
+  --bad: #b91c1c;
+  --bad-soft: #fee2e2;
+  --warn: #92400e;
+  --warn-soft: #fef3c7;
+  --idle-soft: #e5e7eb;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 -apple-system, BlinkMacSystemFont, "PingFang TC", "Noto Sans TC", system-ui, sans-serif; }
+a { color: var(--brand); }
+button { font: inherit; padding: 10px 14px; border-radius: 10px; border: 1px solid var(--brand); background: var(--brand); color: #fff; cursor: pointer; }
+button:disabled { opacity: 0.5; cursor: default; }
+button.secondary { background: #fff; color: var(--brand); }
+button.danger { background: #fff; color: var(--bad); border-color: var(--bad); }
+button.link { background: none; border: none; color: var(--brand); padding: 0 6px; font-size: 14px; }
+button.link.danger { color: var(--bad); }
+input { font: inherit; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; width: 100%; background: #fff; }
+label { display: block; margin: 10px 0; font-size: 14px; color: var(--muted); }
+label input { margin-top: 4px; color: var(--text); }
+h1 { font-size: 22px; margin: 0 0 12px; }
+h2 { font-size: 17px; margin: 0 0 10px; }
+.muted { color: var(--muted); }
+.ok-text { color: var(--ok); }
+.bad-text { color: var(--bad); }
+
+.page { max-width: 720px; margin: 0 auto; padding: 12px; padding-bottom: env(safe-area-inset-bottom); }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px; margin-bottom: 12px; }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 8px 0; }
+.row input { flex: 1; min-width: 120px; }
+
+/* 雙時鐘 */
+.clocks { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+.clock { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px; }
+.clock-label { font-size: 13px; color: var(--muted); }
+.clock-label .off { font-variant-numeric: tabular-nums; margin-left: 4px; }
+.clock-time { font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: 0.5px; }
+.clock-date { font-size: 13px; color: var(--muted); }
+.clock.same { display: flex; flex-direction: column; justify-content: center; }
+.clock-note { font-size: 15px; }
+
+/* 狀態卡 */
+.status { border-radius: 14px; padding: 14px; margin-bottom: 10px; border: 1px solid var(--line); background: var(--card); }
+.status .trip-title { font-size: 14px; color: var(--muted); }
+.status .head { font-size: 26px; font-weight: 800; margin: 4px 0; }
+.status .last { font-size: 14px; }
+.status .sub { font-size: 15px; margin-top: 4px; }
+.status.ok { background: var(--ok-soft); border-color: #a7f3d0; }
+.status.ok .head { color: var(--ok); }
+.status.bad { background: var(--bad-soft); border-color: #fecaca; }
+.status.bad .head, .status.bad .sub { color: var(--bad); }
+.status.offline { background: var(--warn-soft); border-color: #fde68a; }
+.status.offline .sub { color: var(--warn); }
+.status.idle { background: var(--idle-soft); }
+.status.done { background: var(--card); }
+
+/* 地圖 */
+.map { height: 46vh; min-height: 260px; border-radius: 14px; overflow: hidden; border: 1px solid var(--line); background: #e5e7eb; }
+.map.small { height: 280px; margin-top: 8px; }
+.map-wrap { margin-bottom: 12px; }
+
+/* 時間軸 */
+.timeline ul { list-style: none; padding: 0; margin: 0; }
+.tl-item { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; margin-bottom: 8px; border-left: 4px solid var(--brand); }
+.tl-item.src-manual { border-left-style: dashed; }
+.tl-time { font-size: 14px; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.tl-time .local { color: var(--muted); }
+.tl-time .ago { margin-left: auto; color: var(--muted); font-size: 13px; }
+.tl-body { margin: 2px 0; }
+.tl-meta { font-size: 12px; color: var(--muted); }
+.foot { text-align: center; color: var(--muted); padding: 10px 0 20px; }
+
+/* toast */
+.toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: #111827; color: #fff; padding: 10px 14px; border-radius: 10px; font-size: 14px; z-index: 9999; max-width: 90vw; }
+.toast.err { background: var(--bad); }
+
+.me #family-embed .clocks { margin-top: 4px; }
+.landing { text-align: center; padding-top: 20vh; }
