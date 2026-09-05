@@ -79,7 +79,7 @@ firebase deploy --only firestore,functions,hosting
 ### 6. 捷徑
 
 兩種擇一或並用：
-- **主畫面捷徑（最簡單）**：`/me` → 行程管理 → 打卡頁，用 Safari 開啟連結 → 分享 → 加入主畫面。點圖示就能定位或拍照打卡，不需登入；連結外洩就在同一張卡片按「輪替」。
+- **主畫面捷徑（最簡單）**：`/me` → 參數設定 → 打卡頁，用 Safari 開啟連結 → 分享 → 加入主畫面。點圖示就能定位或拍照打卡，不需登入；連結外洩就在同一張卡片按「輪替」。
 - **iOS 捷徑 App**：依 [`shortcuts/README.md`](shortcuts/README.md) 建立捷徑 A（必要）、B、C、D，可搭配自動化。
 
 ## 日常使用

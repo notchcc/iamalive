@@ -1,5 +1,5 @@
 /**
- * /me 管理頁，分三個頁籤：行程管理（建立/結束、打卡頁連結、頻率、航段、預告離線、家人頁連結）、家人頁（與家人相同的預覽，可刪除打卡）、參數設定（群組綁定、捷徑金鑰、帳號）。
+ * /me 管理頁，分三個頁籤：行程管理（建立/結束、頻率、航段、預告離線）、家人頁（與家人相同的預覽，可刪除打卡）、參數設定（打卡頁與家人頁連結、群組綁定、捷徑金鑰、帳號）。
  * 打卡本身不在管理頁：用 /c/{token} 打卡頁、LINE 位置訊息或捷徑。
  */
 import { ApiError, api } from './api';
@@ -206,11 +206,28 @@ export function renderMePage(root: HTMLElement): () => void {
     });
   };
 
-  // ---- 參數設定頁籤：群組綁定、金鑰、帳號 ----
+  // ---- 連結卡片（打卡頁、家人頁）：放在參數設定頁籤 ----
+  const renderLinkCards = (t: TripJson): string => `
+      <section class="card">
+        <h2>打卡頁 <span class="muted">免登入，加到主畫面當捷徑</span></h2>
+        <div class="row"><input id="checkin-url" readonly value="${esc(t.checkinUrl ?? '')}" /><button id="copy-checkin-url" class="secondary" type="button">複製</button><a class="btn-link" href="${esc(t.checkinUrl ?? '#')}" target="_blank" rel="noopener">開啟</a></div>
+        <p class="muted small">iPhone：用 Safari 開啟連結 → 分享 → 加入主畫面，之後點圖示就能定位或拍照打卡。持有連結的人都能替這趟行程打卡，外洩就按輪替。</p>
+        <button id="rotate-checkin" class="danger" type="button">輪替連結（舊連結失效）</button>
+      </section>
+
+      <section class="card">
+        <h2>家人頁連結 <span class="muted">群組訊息內附的同一條</span></h2>
+        <div class="row"><input id="family-url" readonly value="${esc(t.familyUrl)}" /><button id="copy-family-url" class="secondary" type="button">複製</button><a class="btn-link" href="${esc(t.familyUrl)}" target="_blank" rel="noopener">開啟</a></div>
+        <p class="muted small">持有連結者可看地圖與時間軸。要收回請結束行程，下一趟會有新連結。</p>
+      </section>`;
+
+  // ---- 參數設定頁籤：連結、群組綁定、金鑰、帳號 ----
   const renderSettingsPane = (): string => {
     if (!status) return '';
     const u = status.user;
+    const t = status.activeTrip;
     return `
+      ${t ? renderLinkCards(t) : ''}
       <section class="card">
         <h2>家人 LINE 群組</h2>
         ${
@@ -350,7 +367,7 @@ export function renderMePage(root: HTMLElement): () => void {
         <button type="button" data-goto="trip">前往行程管理</button>
       </section>`;
 
-  // ---- 行程管理頁籤：摘要、打卡頁、頻率、航段、預告離線、家人頁連結、結束行程 ----
+  // ---- 行程管理頁籤：摘要、頻率、航段、預告離線、結束行程 ----
   const renderTripPane = (t: TripJson): string => `
       ${renderTripSummary(t)}
 
@@ -382,13 +399,6 @@ export function renderMePage(root: HTMLElement): () => void {
       </section>
 
       <section class="card">
-        <h2>打卡頁 <span class="muted">免登入，加到主畫面當捷徑</span></h2>
-        <div class="row"><input id="checkin-url" readonly value="${esc(t.checkinUrl ?? '')}" /><button id="copy-checkin-url" class="secondary" type="button">複製</button><a class="btn-link" href="${esc(t.checkinUrl ?? '#')}" target="_blank" rel="noopener">開啟</a></div>
-        <p class="muted small">iPhone：用 Safari 開啟連結 → 分享 → 加入主畫面，之後點圖示就能定位或拍照打卡。持有連結的人都能替這趟行程打卡，外洩就按輪替。</p>
-        <button id="rotate-checkin" class="danger" type="button">輪替連結（舊連結失效）</button>
-      </section>
-
-      <section class="card">
         <h2>打卡頻率 <span class="muted">目前每 ${t.intervalHours} 小時</span></h2>
         <form id="interval" class="row"><input name="hours" type="number" min="1" max="72" value="${t.intervalHours}" required /><span>小時</span><button>更改並重算期限</button></form>
         <p class="muted small">期限會立即改為「最後打卡 + 新間隔」；若已經過了，則為現在 + 新間隔。不會通知群組。</p>
@@ -399,11 +409,6 @@ export function renderMePage(root: HTMLElement): () => void {
         <form id="offline" class="row"><input name="hours" type="number" min="1" max="168" value="16" required /><span>小時</span><button>送出</button></form>
       </section>
 
-      <section class="card">
-        <h2>家人頁連結 <span class="muted">群組訊息內附的同一條</span></h2>
-        <div class="row"><input id="family-url" readonly value="${esc(t.familyUrl)}" /><button id="copy-family-url" class="secondary" type="button">複製</button><a class="btn-link" href="${esc(t.familyUrl)}" target="_blank" rel="noopener">開啟</a></div>
-        <p class="muted small">持有連結者可看地圖與時間軸。要收回請結束行程，下一趟會有新連結。</p>
-      </section>
 
       <section class="card">
         <h2>結束行程</h2>
