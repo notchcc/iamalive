@@ -163,10 +163,9 @@ details.manual summary { cursor: pointer; font-size: 14px; }
 
 /* 家人頁：折疊的本頁連結列 + 時間軸載入更多 */
 .share-collapsed { margin: 0 0 8px; }
-.share-collapsed summary { list-style: none; cursor: pointer; display: flex; gap: 6px; align-items: baseline; font-size: 12px; color: var(--muted); padding: 2px 4px; }
+.share-collapsed summary { list-style: none; cursor: pointer; display: inline-flex; gap: 4px; align-items: baseline; font-size: 12px; color: var(--muted); padding: 2px 4px; }
 .share-collapsed summary::-webkit-details-marker { display: none; }
 .share-collapsed summary .lbl { flex: none; }
-.share-collapsed summary .url { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .share-collapsed summary::after { content: '▾'; flex: none; }
 .share-collapsed[open] summary::after { content: '▴'; }
 .share-collapsed .row { margin: 6px 0 4px; }
