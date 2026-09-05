@@ -124,11 +124,6 @@ export interface StatusJson {
   activeTrip: TripJson | null;
 }
 
-export interface WatcherJson {
-  token: string;
-  label: string;
-  url: string;
-}
 
 export interface FlightLegJson {
   flightNo: string;

@@ -304,28 +304,14 @@ async function main() {
   const cpToken = r.json.checkinToken;
   log('public checkin page token ok');
 
-  // 家人連結
-  r = await call('POST', `/trips/${trip.id}/watchers`, { label: '媽媽' });
-  assert.equal(r.status, 201);
-  const momToken = r.json.token;
-  r = await call('GET', `/trips/${trip.id}/watchers`);
-  assert.equal(r.json.length, 2);
-  view = (await db.doc(`views/${momToken}`).get()).data();
-  assert.equal(view.label, '媽媽');
-  assert.equal(view.recent.length, 3, 'new watcher gets existing history'); // 東京、nextHours、免登入各一筆（照片那筆已刪）
-  r = await call('DELETE', `/trips/${trip.id}/watchers/${momToken}`);
-  assert.equal(r.status, 200);
-  assert.equal((await db.doc(`views/${momToken}`).get()).exists, false);
-  r = await call('DELETE', `/trips/${trip.id}/watchers/${trip.groupReadToken}`);
-  assert.equal(r.status, 400, 'group token cannot be removed');
-  log('watcher add/list/remove ok');
-
   // ---- 使用者隔離 ----
   const sessB = await devLogin(B_UID, '旅人 B');
   r = await call('GET', '/trips/active', undefined, sessB);
   assert.equal(r.status, 404, 'B has no active trip');
-  r = await call('GET', `/trips/${trip.id}/watchers`, undefined, sessB);
+  r = await call('PATCH', `/trips/${trip.id}`, { intervalHours: 6 }, sessB);
   assert.equal(r.status, 404, "B cannot see A's trip");
+  r = await call('POST', `/trips/${trip.id}/checkin-token/rotate`, undefined, sessB);
+  assert.equal(r.status, 404, "B cannot rotate A's token");
   r = await call('POST', '/checkin', { lat: 1, lng: 1 }, sessB);
   assert.equal(r.status, 409, 'B has no trip to check in');
   r = await call('GET', '/trips', undefined, sessB);

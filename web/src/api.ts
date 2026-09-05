@@ -1,4 +1,4 @@
-import type { CheckinPageJson, FlightInput, FlightJson, FlightLegJson, KeyJson, StatusJson, TripJson, UserJson, WatcherJson } from './types';
+import type { CheckinPageJson, FlightInput, FlightJson, FlightLegJson, KeyJson, StatusJson, TripJson, UserJson } from './types';
 
 export class ApiError extends Error {
   constructor(
@@ -80,29 +80,6 @@ export const api = {
   trips: () => call<TripJson[]>('GET', '/trips'),
   createTrip: (input: { title: string; startAt: string; endAt: string; intervalHours: number }) =>
     call<TripJson>('POST', '/trips', input),
-  checkin: (input: {
-    lat: number;
-    lng: number;
-    accuracy?: number | null;
-    source: 'web-gps' | 'manual';
-    note?: string;
-    nextHours?: number | null;
-    clientAt?: string;
-  }) => call<{ ok: true; nextDeadlineAt: string; tz: string; pushed: boolean; recovered: boolean }>('POST', '/checkin', input),
-  /** 照片打卡：multipart，欄位由呼叫端組好（photo、lat、lng、note、nextHours、takenAt、clientAt）。 */
-  checkinPhoto: async (form: FormData) => {
-    const res = await fetch('/api/checkin/photo', { method: 'POST', credentials: 'same-origin', body: form });
-    if (!res.ok) {
-      let code = res.statusText;
-      try {
-        code = ((await res.json()) as { error?: string }).error ?? code;
-      } catch {
-        /* ignore */
-      }
-      throw new ApiError(res.status, code);
-    }
-    return (await res.json()) as { ok: true; photoId: string; nextDeadlineAt: string; tz: string; pushed: boolean; recovered: boolean };
-  },
   deleteCheckin: (id: string, checkinId: string) => call<{ ok: true }>('DELETE', `/trips/${id}/checkins/${checkinId}`),
   offline: (id: string, hours: number) =>
     call<{ ok: true; offlineUntil: string; nextDeadlineAt: string; pushed: boolean }>('POST', `/trips/${id}/offline`, { hours }),
@@ -112,8 +89,5 @@ export const api = {
   setInterval: (id: string, hours: number) =>
     call<{ ok: true; intervalHours: number; nextDeadlineAt: string }>('PATCH', `/trips/${id}`, { intervalHours: hours }),
   end: (id: string) => call<{ ok: true; pushed: boolean }>('POST', `/trips/${id}/end`),
-  watchers: (id: string) => call<WatcherJson[]>('GET', `/trips/${id}/watchers`),
-  addWatcher: (id: string, label: string) => call<{ token: string; url: string }>('POST', `/trips/${id}/watchers`, { label }),
-  removeWatcher: (id: string, token: string) => call<{ ok: true }>('DELETE', `/trips/${id}/watchers/${token}`),
   unbindLine: () => call<{ ok: true }>('POST', '/line/unbind'),
 };

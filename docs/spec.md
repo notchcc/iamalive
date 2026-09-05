@@ -17,7 +17,7 @@
 | v0.5 | 新增**航段**（多筆，當地時間輸入），飛行中不警報、期限順延至降落後 3 小時；打卡紀錄加入**反向地理編碼城市**與經緯度；行程開始前不警報；webhook 未綁定時自動綁定首個群組 |
 | v0.6 | 新增**照片打卡**：捷徑 D（分享表單）與 `/me` 上傳，以照片 EXIF 的 GPS 與拍攝時間為打卡資訊；照片存私有 GCS bucket，家人頁經 token 驗證取圖並顯示縮圖 |
 | v0.7 | **多使用者**：`/me` 改用 **LINE Login**（session cookie），捷徑改用可撤銷的 **API 金鑰**；行程、群組綁定、金鑰皆以 LINE userId 為範圍；群組以**綁定碼**綁定；不做邀請名單（任何 LINE 帳號可登入） |
-| v0.9 | `/me` 改以 **LIFF** 登入（LINE 內自動登入，`POST /api/auth/liff`），瀏覽器授權碼流程保留；每趟行程一個**免登入打卡頁** `/c/{token}`（PWA 主畫面捷徑，可輪替） |
+| v0.9 | `/me` 改以 **LIFF** 登入；管理頁**移除打卡功能**與專屬家人連結（只保留群組那條）（LINE 內自動登入，`POST /api/auth/liff`），瀏覽器授權碼流程保留；每趟行程一個**免登入打卡頁** `/c/{token}`（PWA 主畫面捷徑，可輪替） |
 | v0.8 | 航班查詢（AeroDataBox）預填航段；行程中可**更改打卡頻率**（期限立即重算）；`/me` 分成**打卡 / 行程管理 / 家人頁 / 參數設定**四個頁籤；期限前 1 小時官方帳號**私訊旅人提醒** |
 
 ---
@@ -72,7 +72,7 @@
  │ Firebase                                              │             │
  │  Hosting ── 靜態 SPA、/api/** rewrite → Functions      │             │
  │  Cloud Functions (2nd gen, Node 22, asia-east1)       │             │
- │   · api            checkin / trips / watchers         │             │
+ │   · api            checkin / trips / c(打卡頁)         │             │
  │   · lineWebhook    join / leave / location / text     │             │
  │   · checkOverdue   每 15 分鐘                          │             │
  │        │                                              │             │
@@ -262,8 +262,6 @@ service cloud.firestore {
 | GET | `/api/p/:readToken/:photoId` | 家人頁取圖 | **不需寫入 token**；驗證 `views/{readToken}` 存在且照片屬於該行程後串流回傳，`Cache-Control: private, max-age=86400` |
 | GET | `/api/flights/lookup?flightNo=BR61&date=YYYY-MM-DD` | 航班查詢 | AeroDataBox（RapidAPI，Secret `RAPIDAPI_KEY`）；回傳各航段的 IATA、城市、**機場時區**、表定當地與 UTC 時間；以「班號_日期」快取 12 小時；未設金鑰回 503 |
 | PUT | `/api/trips/:id/flights` | 整批更新航段 | `{ flights: [{ flightNo, fromCity, fromTz, departLocal, toCity, toTz, arriveLocal }] }`，`*Local` 為 `YYYY-MM-DDTHH:mm` 當地時間；驗證時區有效、降落晚於起飛、單段 ≤ 30 小時 |
-| POST | `/api/trips/:id/watchers` | 新增家人頁連結 | 產生 readToken，建立 `views/{token}`，回傳連結 |
-| DELETE | `/api/trips/:id/watchers/:token` | 撤銷連結 | 刪 view |
 | GET | `/api/trips/active` | 取目前 active 行程 | 捷徑與 `/me` 用 |
 | GET | `/api/status` | 群組綁定狀態、本月已用額度 | `/me` 顯示 |
 
@@ -372,14 +370,14 @@ reply 免費，不計額度。非旅行者傳的位置訊息忽略。
 
 ### 6.3 `/me` 網頁（備援與管理）
 
-- 分四個頁籤，選取的頁籤記在 URL hash（`#checkin` / `#trip` / `#preview` / `#settings`），重新整理後保留：
-  - **打卡**：行程摘要（最後回報、下次期限）、備援打卡、用照片打卡。無行程時提示前往行程管理。
-  - **行程管理**：無行程時為建立行程表單；有行程時為摘要、航段、預告離線、家人連結、結束行程。
+- 分三個頁籤，選取的頁籤記在 URL hash（`#trip` / `#preview` / `#settings`），重新整理後保留：
+  - **行程管理**：無行程時為建立行程表單；有行程時為摘要、打卡頁連結（可輪替）、打卡頻率、航段、預告離線、家人頁連結（僅群組那一條，複製 / 開啟）、結束行程。
   - **家人頁**：內嵌與家人相同的頁面（雙時鐘、狀態、地圖、時間軸），時間軸可刪除打卡；切到此頁籤才掛載。
   - **參數設定**：家人 LINE 群組綁定與本月額度、捷徑金鑰、帳號（登出）。
 - 「用瀏覽器定位打卡」：`getCurrentPosition({ enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 })`，`source = web-gps`，此路徑有精度值。
 - 「地圖選點打卡」：定位失敗時的手動路徑，`source = manual`。
-- 建立 / 結束行程、預告離線、新增 / 撤銷家人連結、顯示群組綁定狀態與本月額度。
+- 建立 / 結束行程、預告離線、顯示群組綁定狀態與本月額度。家人頁只有一條連結（建立行程時產生、群組訊息內附的那條），不另外製作專屬家人連結；資料模型仍保留 `readTokens[]`。
+- **管理頁不含打卡功能**：打卡走 `/c/{token}` 打卡頁、LINE 位置 / 照片訊息或 iOS 捷徑。
 - **打卡頻率**卡片（行程管理頁籤）：行程中更改間隔並立即重算期限（`PATCH /api/trips/:id`）。
 - **用照片打卡**卡片：兩個按鈕，「拍照打卡」對應 `<input type=file accept=image/* capture=environment>`（iOS 直接開相機；瀏覽器相機拍的照片沒有 GPS，自動改用目前定位，拍攝時間取現在），「選擇照片」對應不帶 `capture` 的 input（開圖庫）；瀏覽器端以 `exifr` 讀 GPS、拍攝時間、`GPSHPositioningError`，無 GPS 時可改用目前定位；`createImageBitmap` 縮圖至 1600px 後 multipart 上傳。iOS Safari 選圖是否保留 GPS EXIF 因版本而異，需實機確認。
 - **登入**：未登入只顯示「用 LINE 登入」；已登入右上顯示名稱與頭像，登出在「參數設定」。

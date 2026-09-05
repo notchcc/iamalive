@@ -1,14 +1,12 @@
 /**
- * /me 管理頁，分四個頁籤：打卡（備援打卡、照片打卡）、行程管理（建立/結束、航段、預告離線、家人連結）、家人頁（與家人相同的預覽，可刪除打卡）、參數設定（群組綁定、捷徑金鑰、帳號）。
+ * /me 管理頁，分三個頁籤：行程管理（建立/結束、打卡頁連結、頻率、航段、預告離線、家人頁連結）、家人頁（與家人相同的預覽，可刪除打卡）、參數設定（群組綁定、捷徑金鑰、帳號）。
+ * 打卡本身不在管理頁：用 /c/{token} 打卡頁、LINE 位置訊息或捷徑。
  */
-import L from 'leaflet';
 import { ApiError, api } from './api';
 import { renderFamilyPage } from './family';
 import { getLiff } from './liff';
-import { createMap } from './mapview';
-import { extractPhotoMeta, fmtBytes, shrinkImage } from './photo';
 import { CITY_NAMES, TAIPEI, fmtBoth, fmtDateTime, toLocalInput } from './time';
-import type { FlightInput, FlightJson, FlightLegJson, KeyJson, StatusJson, TripJson, WatcherJson } from './types';
+import type { FlightInput, FlightJson, FlightLegJson, KeyJson, StatusJson, TripJson } from './types';
 
 function esc(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
@@ -43,12 +41,8 @@ function toLocalInputValue(d: Date): string {
 
 export function renderMePage(root: HTMLElement): () => void {
   let status: StatusJson | null = null;
-  let watchers: WatcherJson[] = [];
   let keys: KeyJson[] = [];
   let familyCleanup: (() => void) | null = null;
-  let pickMap: L.Map | null = null;
-  let pickMarker: L.CircleMarker | null = null;
-  let picked: { lat: number; lng: number } | null = null;
 
   const toast = (msg: string, kind: 'ok' | 'err' = 'ok'): void => {
     const el = document.createElement('div');
@@ -127,7 +121,7 @@ export function renderMePage(root: HTMLElement): () => void {
   const load = async (): Promise<void> => {
     try {
       status = await api.status();
-      [watchers, keys] = await Promise.all([status.activeTrip ? api.watchers(status.activeTrip.id) : Promise.resolve([]), api.keys()]);
+      keys = await api.keys();
       renderMain();
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) {
@@ -142,9 +136,8 @@ export function renderMePage(root: HTMLElement): () => void {
     }
   };
 
-  type Tab = 'checkin' | 'trip' | 'preview' | 'settings';
+  type Tab = 'trip' | 'preview' | 'settings';
   const TABS: Array<[Tab, string]> = [
-    ['checkin', '打卡'],
     ['trip', '行程管理'],
     ['preview', '家人頁'],
     ['settings', '參數設定'],
@@ -158,10 +151,6 @@ export function renderMePage(root: HTMLElement): () => void {
     if (!status) return;
     familyCleanup?.();
     familyCleanup = null;
-    pickMap?.remove();
-    pickMap = null;
-    pickMarker = null;
-    picked = null;
 
     const t = status.activeTrip;
     const u = status.user;
@@ -174,7 +163,6 @@ export function renderMePage(root: HTMLElement): () => void {
           ${TABS.map(([k, label]) => `<button type="button" role="tab" data-tab="${k}" aria-selected="false">${label}</button>`).join('')}
         </nav>
 
-        <section class="pane" data-pane="checkin" hidden>${t ? renderCheckinPane(t) : renderNoTripHint('打卡')}</section>
         <section class="pane" data-pane="trip" hidden>${t ? renderTripPane(t) : renderCreateSection()}</section>
         <section class="pane" data-pane="preview" hidden>${t ? '<div id="family-embed"></div>' : renderNoTripHint('家人頁預覽')}</section>
         <section class="pane" data-pane="settings" hidden>${renderSettingsPane()}</section>
@@ -195,26 +183,10 @@ export function renderMePage(root: HTMLElement): () => void {
     root.querySelectorAll<HTMLButtonElement>('[data-goto]').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.goto as Tab)));
 
     bindSettingsPane();
-    if (t) {
-      bindTripSection(t);
-      renderWatchers(t);
-      root.querySelector<HTMLFormElement>('#add-watcher')!.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const fd = new FormData(e.currentTarget as HTMLFormElement);
-        try {
-          await api.addWatcher(t.id, String(fd.get('label')));
-          watchers = await api.watchers(t.id);
-          renderWatchers(t);
-          (e.target as HTMLFormElement).reset();
-        } catch (err) {
-          toast(errText(err), 'err');
-        }
-      });
-    } else {
-      bindCreateSection();
-    }
+    if (t) bindTripSection(t);
+    else bindCreateSection();
 
-    showTab(tabFromHash() ?? (t ? 'checkin' : 'trip'));
+    showTab(tabFromHash() ?? 'trip');
   };
 
   const mountFamilyEmbed = (t: TripJson): void => {
@@ -378,47 +350,7 @@ export function renderMePage(root: HTMLElement): () => void {
         <button type="button" data-goto="trip">前往行程管理</button>
       </section>`;
 
-  // ---- 打卡頁籤：摘要、備援打卡、照片打卡 ----
-  const renderCheckinPane = (t: TripJson): string => `
-      ${renderTripSummary(t)}
-
-      <section class="card">
-        <h2>備援打卡</h2>
-        <label>備註<input id="note" maxlength="200" placeholder="可空" /></label>
-        <label>下次回報（小時，可空）<input id="nextHours" type="number" min="1" max="168" step="1" /></label>
-        <div class="row">
-          <button id="gps">用瀏覽器定位打卡</button>
-          <button id="pick-toggle" class="secondary">地圖選點</button>
-        </div>
-        <div id="pick-wrap" hidden>
-          <div id="pick-map" class="map small"></div>
-          <div class="row"><span id="pick-coord" class="muted">點地圖選擇位置</span><button id="pick-submit" disabled>以此位置打卡</button></div>
-        </div>
-      </section>
-
-      <section class="card">
-        <h2>用照片打卡 <span class="muted">讀取照片的 GPS 與拍攝時間</span></h2>
-        <input id="photo-camera" type="file" accept="image/*" capture="environment" hidden />
-        <input id="photo-file" type="file" accept="image/*" hidden />
-        <div class="row">
-          <button id="photo-take" type="button">📷 拍照打卡</button>
-          <button id="photo-choose" type="button" class="secondary">🖼️ 選擇照片</button>
-        </div>
-        <div id="photo-preview" class="photo-preview" hidden>
-          <img id="photo-img" alt="" />
-          <div class="info">
-            <div id="photo-meta"></div>
-            <div class="row">
-              <button id="photo-submit" disabled>上傳並打卡</button>
-              <button id="photo-gps" class="secondary" hidden>改用目前定位</button>
-            </div>
-          </div>
-        </div>
-        <p class="muted small">拍照的照片沒有 GPS，會自動改用目前定位；從圖庫選的照片會讀 EXIF 座標。上傳前會縮到 1600px。備註與「下次回報」欄位共用上方輸入。</p>
-      </section>
-`;
-
-  // ---- 行程管理頁籤：摘要、航段、預告離線、家人連結、結束行程 ----
+  // ---- 行程管理頁籤：摘要、打卡頁、頻率、航段、預告離線、家人頁連結、結束行程 ----
   const renderTripPane = (t: TripJson): string => `
       ${renderTripSummary(t)}
 
@@ -467,8 +399,11 @@ export function renderMePage(root: HTMLElement): () => void {
         <form id="offline" class="row"><input name="hours" type="number" min="1" max="168" value="16" required /><span>小時</span><button>送出</button></form>
       </section>
 
-      <section class="card"><h2>家人連結</h2><ul id="watchers"></ul>
-        <form id="add-watcher" class="row"><input name="label" placeholder="稱呼（如 媽媽）" maxlength="20" required /><button>新增連結</button></form></section>
+      <section class="card">
+        <h2>家人頁連結 <span class="muted">群組訊息內附的同一條</span></h2>
+        <div class="row"><input id="family-url" readonly value="${esc(t.familyUrl)}" /><button id="copy-family-url" class="secondary" type="button">複製</button><a class="btn-link" href="${esc(t.familyUrl)}" target="_blank" rel="noopener">開啟</a></div>
+        <p class="muted small">持有連結者可看地圖與時間軸。要收回請結束行程，下一趟會有新連結。</p>
+      </section>
 
       <section class="card">
         <h2>結束行程</h2>
@@ -476,60 +411,6 @@ export function renderMePage(root: HTMLElement): () => void {
       </section>`;
 
   const bindTripSection = (t: TripJson): void => {
-    const noteEl = root.querySelector<HTMLInputElement>('#note')!;
-    const nextEl = root.querySelector<HTMLInputElement>('#nextHours')!;
-    const payloadExtras = () => ({
-      note: noteEl.value.trim(),
-      nextHours: nextEl.value ? Number(nextEl.value) : null,
-      clientAt: new Date().toISOString(),
-    });
-
-    root.querySelector<HTMLButtonElement>('#gps')!.addEventListener('click', () => {
-      const btn = root.querySelector<HTMLButtonElement>('#gps')!;
-      btn.disabled = true;
-      btn.textContent = '定位中…';
-      navigator.geolocation.getCurrentPosition(
-        async (pos) => {
-          try {
-            const r = await api.checkin({
-              lat: pos.coords.latitude,
-              lng: pos.coords.longitude,
-              accuracy: pos.coords.accuracy,
-              source: 'web-gps',
-              ...payloadExtras(),
-            });
-            toast(`已打卡，下次期限 ${fmtBoth(new Date(r.nextDeadlineAt), r.tz)}`);
-            await load();
-          } catch (e) {
-            toast(errText(e), 'err');
-          } finally {
-            btn.disabled = false;
-            btn.textContent = '用瀏覽器定位打卡';
-          }
-        },
-        (err) => {
-          btn.disabled = false;
-          btn.textContent = '用瀏覽器定位打卡';
-          toast(`定位失敗（${err.message}），請改用地圖選點`, 'err');
-          showPicker(t);
-        },
-        { enableHighAccuracy: true, timeout: 10_000, maximumAge: 60_000 },
-      );
-    });
-
-    root.querySelector('#pick-toggle')!.addEventListener('click', () => showPicker(t));
-
-    root.querySelector<HTMLButtonElement>('#pick-submit')!.addEventListener('click', async () => {
-      if (!picked) return;
-      try {
-        const r = await api.checkin({ lat: picked.lat, lng: picked.lng, accuracy: null, source: 'manual', ...payloadExtras() });
-        toast(`已打卡（手動選點），下次期限 ${fmtBoth(new Date(r.nextDeadlineAt), r.tz)}`);
-        await load();
-      } catch (e) {
-        toast(errText(e), 'err');
-      }
-    });
-
     // ---- 航段 ----
     let flights: FlightJson[] = t.flights ?? [];
     const toInput = (f: FlightJson): FlightInput => ({
@@ -677,94 +558,14 @@ export function renderMePage(root: HTMLElement): () => void {
       }
     });
 
-    // ---- 照片打卡 ----
-    const photoFile = root.querySelector<HTMLInputElement>('#photo-file')!;
-    const photoCamera = root.querySelector<HTMLInputElement>('#photo-camera')!;
-    const photoPreview = root.querySelector<HTMLElement>('#photo-preview')!;
-    const photoImg = root.querySelector<HTMLImageElement>('#photo-img')!;
-    const photoMetaEl = root.querySelector<HTMLElement>('#photo-meta')!;
-    const photoSubmit = root.querySelector<HTMLButtonElement>('#photo-submit')!;
-    const photoGpsBtn = root.querySelector<HTMLButtonElement>('#photo-gps')!;
-    let photoState: { file: File; lat: number | null; lng: number | null; accuracy: number | null; takenAt: Date | null } | null = null;
-
-    const renderPhotoMeta = (): void => {
-      if (!photoState) return;
-      const p = photoState;
-      const loc = p.lat != null && p.lng != null ? `📍 ${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}${p.accuracy ? ` ±${Math.round(p.accuracy)} m` : ''}` : '<span class="bad-text">照片沒有 GPS</span>';
-      const taken = p.takenAt ? `拍攝於 ${fmtBoth(p.takenAt, t.travelerTz)}` : '無拍攝時間';
-      photoMetaEl.innerHTML = `<div>${loc}</div><div class="muted">${esc(taken)} · ${esc(fmtBytes(p.file.size))}</div>`;
-      photoSubmit.disabled = !(p.lat != null && p.lng != null);
-      photoGpsBtn.hidden = false;
-    };
-
-    const fillFromGps = (): void => {
-      photoGpsBtn.disabled = true;
-      photoMetaEl.innerHTML = `${photoMetaEl.innerHTML}<div class="muted">定位中…</div>`;
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          if (photoState) {
-            photoState.lat = pos.coords.latitude;
-            photoState.lng = pos.coords.longitude;
-            photoState.accuracy = pos.coords.accuracy;
-            renderPhotoMeta();
-          }
-          photoGpsBtn.disabled = false;
-        },
-        (err) => {
-          photoGpsBtn.disabled = false;
-          renderPhotoMeta();
-          toast(`定位失敗（${err.message}）`, 'err');
-        },
-        { enableHighAccuracy: true, timeout: 10_000, maximumAge: 60_000 },
-      );
-    };
-
-    const onPhotoPicked = async (input: HTMLInputElement, fromCamera: boolean): Promise<void> => {
-      const file = input.files?.[0];
-      if (!file) return;
-      photoPreview.hidden = false;
-      photoImg.src = URL.createObjectURL(file);
-      photoMetaEl.textContent = '讀取照片資訊…';
-      const meta = await extractPhotoMeta(file);
-      photoState = { file, ...meta };
-      if (fromCamera && photoState.takenAt == null) photoState.takenAt = new Date();
-      renderPhotoMeta();
-      // 瀏覽器相機拍的照片不會帶 GPS，直接改用目前定位
-      if (photoState.lat == null || photoState.lng == null) fillFromGps();
-      input.value = '';
-    };
-    root.querySelector('#photo-take')!.addEventListener('click', () => photoCamera.click());
-    root.querySelector('#photo-choose')!.addEventListener('click', () => photoFile.click());
-    photoCamera.addEventListener('change', () => void onPhotoPicked(photoCamera, true));
-    photoFile.addEventListener('change', () => void onPhotoPicked(photoFile, false));
-    photoGpsBtn.addEventListener('click', fillFromGps);
-
-    photoSubmit.addEventListener('click', async () => {
-      if (!photoState || photoState.lat == null || photoState.lng == null) return;
-      photoSubmit.disabled = true;
-      photoSubmit.textContent = '上傳中…';
+    root.querySelector('#copy-family-url')!.addEventListener('click', async () => {
       try {
-        const { blob, type } = await shrinkImage(photoState.file);
-        const fd = new FormData();
-        fd.append('lat', String(photoState.lat));
-        fd.append('lng', String(photoState.lng));
-        if (photoState.accuracy) fd.append('accuracy', String(photoState.accuracy));
-        const extras = payloadExtras();
-        if (extras.note) fd.append('note', extras.note);
-        if (extras.nextHours) fd.append('nextHours', String(extras.nextHours));
-        if (photoState.takenAt) fd.append('takenAt', photoState.takenAt.toISOString());
-        fd.append('clientAt', extras.clientAt);
-        fd.append('photo', blob, type === 'image/jpeg' ? 'photo.jpg' : photoState.file.name || 'photo');
-        const r = await api.checkinPhoto(fd);
-        toast(`已用照片打卡，下次期限 ${fmtBoth(new Date(r.nextDeadlineAt), r.tz)}`);
-        await load();
-      } catch (e) {
-        toast(errText(e), 'err');
-        photoSubmit.disabled = false;
-        photoSubmit.textContent = '上傳並打卡';
+        await navigator.clipboard.writeText(t.familyUrl);
+        toast('已複製');
+      } catch {
+        toast('無法複製，請手動選取', 'err');
       }
     });
-
     root.querySelector('#copy-checkin-url')!.addEventListener('click', async () => {
       try {
         await navigator.clipboard.writeText(t.checkinUrl ?? '');
@@ -821,25 +622,6 @@ export function renderMePage(root: HTMLElement): () => void {
     });
   };
 
-  const showPicker = (t: TripJson): void => {
-    const wrap = root.querySelector<HTMLElement>('#pick-wrap')!;
-    wrap.hidden = false;
-    if (pickMap) return;
-    pickMap = createMap(root.querySelector<HTMLElement>('#pick-map')!);
-    const coordEl = root.querySelector<HTMLElement>('#pick-coord')!;
-    const submit = root.querySelector<HTMLButtonElement>('#pick-submit')!;
-    const center: [number, number] = t.lastCheckinGeo ? [t.lastCheckinGeo.lat, t.lastCheckinGeo.lng] : [25.04, 121.56];
-    pickMap.setView(center, t.lastCheckinGeo ? 13 : 10);
-    pickMap.on('click', (ev: L.LeafletMouseEvent) => {
-      picked = { lat: ev.latlng.lat, lng: ev.latlng.lng };
-      if (!pickMarker) pickMarker = L.circleMarker(ev.latlng, { radius: 8, color: '#b91c1c', fillColor: '#ef4444', fillOpacity: 0.9 }).addTo(pickMap!);
-      else pickMarker.setLatLng(ev.latlng);
-      coordEl.textContent = `${picked.lat.toFixed(5)}, ${picked.lng.toFixed(5)}`;
-      submit.disabled = false;
-    });
-    window.setTimeout(() => pickMap?.invalidateSize(), 50);
-  };
-
   const renderCreateSection = (): string => {
     const start = new Date();
     const end = new Date(start.getTime() + 7 * 86_400_000);
@@ -876,46 +658,9 @@ export function renderMePage(root: HTMLElement): () => void {
     });
   };
 
-  const renderWatchers = (t: TripJson): void => {
-    const ul = root.querySelector<HTMLElement>('#watchers')!;
-    ul.innerHTML = watchers
-      .map(
-        (w) => `<li class="row">
-          <span><b>${esc(w.label)}</b>${w.token === t.groupReadToken ? ' <span class="muted">（群組訊息用）</span>' : ''}</span>
-          <input readonly value="${esc(w.url)}" />
-          <button class="secondary" data-copy="${esc(w.url)}">複製</button>
-          ${w.token === t.groupReadToken ? '' : `<button class="danger" data-del="${esc(w.token)}">撤銷</button>`}
-        </li>`,
-      )
-      .join('');
-    ul.querySelectorAll<HTMLButtonElement>('[data-copy]').forEach((b) =>
-      b.addEventListener('click', async () => {
-        try {
-          await navigator.clipboard.writeText(b.dataset.copy!);
-          toast('已複製');
-        } catch {
-          toast('無法複製，請手動選取', 'err');
-        }
-      }),
-    );
-    ul.querySelectorAll<HTMLButtonElement>('[data-del]').forEach((b) =>
-      b.addEventListener('click', async () => {
-        if (!confirm('撤銷這條連結？對方將無法再查看。')) return;
-        try {
-          await api.removeWatcher(t.id, b.dataset.del!);
-          watchers = await api.watchers(t.id);
-          renderWatchers(t);
-        } catch (e) {
-          toast(errText(e), 'err');
-        }
-      }),
-    );
-  };
-
   void load();
 
   return () => {
     familyCleanup?.();
-    pickMap?.remove();
   };
 }

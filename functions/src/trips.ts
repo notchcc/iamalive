@@ -335,32 +335,6 @@ export async function setFlights(snap: TripSnap, flights: FlightSegment[]): Prom
   return sorted;
 }
 
-export async function addWatcher(snap: TripSnap, label: string): Promise<{ token: string; url: string }> {
-  const trip = snap.data();
-  const token = newToken();
-  const recent = await loadRecent(snap.id);
-  const batch = db.batch();
-  batch.set(viewsCol.doc(token), buildView(snap.id, trip, label, recent));
-  batch.update(snap.ref, { readTokens: FieldValue.arrayUnion(token), updatedAt: Timestamp.now() });
-  await batch.commit();
-  return { token, url: familyUrl(token) };
-}
-
-export async function removeWatcher(snap: TripSnap, token: string): Promise<void> {
-  const trip = snap.data();
-  if (token === trip.groupReadToken) throw new HttpError(400, 'CANNOT_REMOVE_GROUP_TOKEN');
-  if (!trip.readTokens.includes(token)) throw new HttpError(404, 'TOKEN_NOT_FOUND');
-  const batch = db.batch();
-  batch.delete(viewsCol.doc(token));
-  batch.update(snap.ref, { readTokens: FieldValue.arrayRemove(token), updatedAt: Timestamp.now() });
-  await batch.commit();
-}
-
-export async function listWatchers(trip: Trip): Promise<Array<{ token: string; label: string; url: string }>> {
-  const snaps = await Promise.all(trip.readTokens.map((t) => viewsCol.doc(t).get()));
-  return snaps.map((s) => ({ token: s.id, label: s.data()?.label ?? '家人', url: familyUrl(s.id) }));
-}
-
 /**
  * 刪除單筆打卡（含照片）。以剩餘最新一筆重算最後回報欄位；nextDeadlineAt 不變。
  */

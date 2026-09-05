@@ -29,15 +29,12 @@ import {
 } from './auth.js';
 import {
   HttpError,
-  addWatcher,
   createTrip,
   deleteCheckin,
   endTrip,
   resyncTrip,
   getActiveTrip,
-  listWatchers,
   recordCheckin,
-  removeWatcher,
   requireActiveTrip,
   setFlights,
   setIntervalHours,
@@ -115,7 +112,6 @@ const FlightInputSchema = z
   .refine((f) => f.arriveAt > f.departAt, { message: 'arrive must be after depart' })
   .refine((f) => f.arriveAt.getTime() - f.departAt.getTime() <= 30 * 3600e3, { message: 'segment longer than 30h' });
 const FlightsSchema = z.object({ flights: z.array(FlightInputSchema).max(20) });
-const WatcherSchema = z.object({ label: z.string().min(1).max(20) });
 
 type Handler = (req: Request, res: Response) => Promise<void>;
 const wrap =
@@ -604,32 +600,6 @@ export function createApp(): express.Express {
     wrap(async (req, res) => {
       const trip = await requireTrip(uidOf(res), req.params.id, false);
       await resyncTrip(trip);
-      res.json({ ok: true });
-    }),
-  );
-
-  r.get(
-    '/trips/:id/watchers',
-    wrap(async (req, res) => {
-      const trip = await requireTrip(uidOf(res), req.params.id, false);
-      res.json(await listWatchers(trip.data()));
-    }),
-  );
-
-  r.post(
-    '/trips/:id/watchers',
-    wrap(async (req, res) => {
-      const { label } = WatcherSchema.parse(req.body);
-      const trip = await requireTrip(uidOf(res), req.params.id, false);
-      res.status(201).json(await addWatcher(trip, label));
-    }),
-  );
-
-  r.delete(
-    '/trips/:id/watchers/:token',
-    wrap(async (req, res) => {
-      const trip = await requireTrip(uidOf(res), req.params.id, false);
-      await removeWatcher(trip, req.params.token);
       res.json({ ok: true });
     }),
   );
