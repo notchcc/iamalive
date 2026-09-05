@@ -54,10 +54,19 @@ export function renderFamilyPage(root: HTMLElement, token: string, tlOpts: Timel
     const seen = new Set(view.recent.map((r) => r.id));
     return [...view.recent, ...extra.filter((e) => !seen.has(e.id))];
   };
+  let trackKey = '';
   const renderTl = (): void => {
     if (!view) return;
     const all = fullList();
-    renderTimeline(timelineEl, all.slice(0, shownCount), new Date(), photoUrl, tlOpts);
+    const shown = all.slice(0, shownCount);
+    renderTimeline(timelineEl, shown, new Date(), photoUrl, tlOpts);
+    // 地圖只畫時間軸已載入的點；資料沒變就不重畫（每分鐘的「多久前」更新不動地圖）
+    const key = shown.map((s) => s.id ?? s.at.toMillis()).join(',');
+    if (key !== trackKey) {
+      trackKey = key;
+      track.render(shown, { fit: firstFit, photoUrl });
+      firstFit = false;
+    }
     const hasMore = shownCount < all.length || !exhausted;
     moreEl.textContent = loadingMore ? '載入中…' : hasMore ? '' : all.length > PAGE ? '已顯示全部' : '';
     moreEl.hidden = !hasMore && all.length <= PAGE;
@@ -201,8 +210,6 @@ export function renderFamilyPage(root: HTMLElement, token: string, tlOpts: Timel
     renderClocks();
     renderStatus();
     renderFlights();
-    track.render(view.recent, { fit: firstFit, photoUrl });
-    firstFit = false;
     renderTl();
     applyPwaIdentity('family', view.title);
   };
