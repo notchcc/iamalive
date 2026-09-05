@@ -6,6 +6,7 @@ import { firestore } from './firebase';
 import { currentFlight, effectiveDeadline, nextFlight, toWindows } from './flights';
 import { TrackLayer, createMap, placeText, renderTimeline, type TimelineOpts } from './mapview';
 import { renderShareBar } from './share';
+import { applyPwaIdentity } from './pwa';
 import { TAIPEI, fmtAgo, fmtBoth, fmtClock, fmtDate, fmtDateTime, fmtHours, sameAsTaipei, tzLabel, utcOffset } from './time';
 import type { View } from './types';
 
@@ -33,6 +34,7 @@ export function renderFamilyPage(root: HTMLElement, token: string, tlOpts: Timel
   const statusEl = root.querySelector<HTMLElement>('#status')!;
   const flightsEl = root.querySelector<HTMLElement>('#flights')!;
   const timelineEl = root.querySelector<HTMLElement>('#timeline')!;
+  applyPwaIdentity('family');
   renderShareBar(root.querySelector<HTMLElement>('#share')!, `${location.origin}/w/${token}`, '把這條連結傳給家人即可查看；在 LINE 內按「開啟」會用瀏覽器開啟。');
   const map = createMap(root.querySelector<HTMLElement>('#map')!);
   const track = new TrackLayer(map);
@@ -139,7 +141,7 @@ export function renderFamilyPage(root: HTMLElement, token: string, tlOpts: Timel
     track.render(view.recent, { fit: firstFit, photoUrl });
     firstFit = false;
     renderTimeline(timelineEl, view.recent, new Date(), photoUrl, tlOpts);
-    document.title = `${view.title} · iamalive`;
+    applyPwaIdentity('family', view.title);
   };
 
   renderClocks();

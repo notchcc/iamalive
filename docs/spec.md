@@ -395,7 +395,7 @@ reply 免費，不計額度。非旅行者傳的位置訊息忽略。
 - 每趟行程建立時產生 `checkinToken`（與 readToken 同格式，22 字元 URL-safe）；舊行程在 `/status` 讀取時補上。
 - 頁面：狀態卡（最後回報多久前、地點、下次期限、離線）、備註與下次回報欄、三個大按鈕「定位打卡 / 拍照打卡 / 選擇照片」。拍照走 `capture=environment`，沒有 GPS 時自動改用目前定位。頁面可見（切回前景）時自動重新整理，30 秒更新「多久前」。
 - 頁面底部「本頁連結」列（家人頁同樣有）：顯示網址、複製、開啟；LIFF 內「開啟」以 `liff.openWindow({external:true})` 交給 Safari，才能加到主畫面。
-- 站台附 `manifest.webmanifest`（`display: standalone`、不設 `start_url`，iOS 以加入時的網址為起點）與 `apple-touch-icon`，加到主畫面後以獨立視窗開啟。
+- 加到主畫面的身分依頁面切換（`pwa.ts` 於載入時替換 `<link rel=manifest>`、`apple-touch-icon`、`apple-mobile-web-app-title`、`theme-color`）：打卡頁為青綠圖釘、名稱「打卡」（`manifest-checkin.webmanifest`）；家人頁為琥珀色房子加愛心、名稱「家人頁」（`manifest-family.webmanifest`）；管理頁用預設。manifest 皆 `display: standalone`、不設 `start_url`（iOS 以加入時的網址為起點）。
 - 安全性：token 即能力，持有者只能看該行程摘要與打卡，不能改行程、看不到家人連結與照片；`/c/**` 加 `Referrer-Policy: same-origin` 與 `no-store`；外洩時在 `/me` 輪替。
 
 ---

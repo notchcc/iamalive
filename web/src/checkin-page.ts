@@ -7,6 +7,7 @@ import { extractPhotoMeta, fmtBytes, shrinkImage } from './photo';
 import { fmtAgo, fmtBoth } from './time';
 import type { CheckinPageJson } from './types';
 import { renderShareBar } from './share';
+import { applyPwaIdentity } from './pwa';
 
 function esc(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
@@ -24,6 +25,7 @@ const errText = (e: unknown): string => (e instanceof ApiError ? (ERR[e.code] ??
 
 export function renderCheckinPage(root: HTMLElement, token: string): () => void {
   let info: CheckinPageJson | null = null;
+  applyPwaIdentity('checkin');
   let timer: number | null = null;
   let photoState: { file: File; lat: number | null; lng: number | null; accuracy: number | null; takenAt: Date | null } | null = null;
 
@@ -106,6 +108,7 @@ export function renderCheckinPage(root: HTMLElement, token: string): () => void 
   const load = async (): Promise<void> => {
     try {
       info = await api.checkinPage.get(token);
+      applyPwaIdentity('checkin', info.title);
       renderStatus();
       setBusy(info.status !== 'active');
     } catch (e) {
