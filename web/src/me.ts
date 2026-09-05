@@ -1,5 +1,5 @@
 /**
- * /me 管理頁，分三個頁籤：打卡（備援打卡、照片打卡、家人頁預覽）、行程管理（建立/結束、航段、預告離線、家人連結）、參數設定（群組綁定、捷徑金鑰、帳號）。
+ * /me 管理頁，分四個頁籤：打卡（備援打卡、照片打卡）、行程管理（建立/結束、航段、預告離線、家人連結）、家人頁（與家人相同的預覽，可刪除打卡）、參數設定（群組綁定、捷徑金鑰、帳號）。
  */
 import L from 'leaflet';
 import { ApiError, api } from './api';
@@ -110,10 +110,11 @@ export function renderMePage(root: HTMLElement): () => void {
     }
   };
 
-  type Tab = 'checkin' | 'trip' | 'settings';
+  type Tab = 'checkin' | 'trip' | 'preview' | 'settings';
   const TABS: Array<[Tab, string]> = [
     ['checkin', '打卡'],
     ['trip', '行程管理'],
+    ['preview', '家人頁'],
     ['settings', '參數設定'],
   ];
   const tabFromHash = (): Tab | null => {
@@ -141,8 +142,9 @@ export function renderMePage(root: HTMLElement): () => void {
           ${TABS.map(([k, label]) => `<button type="button" role="tab" data-tab="${k}" aria-selected="false">${label}</button>`).join('')}
         </nav>
 
-        <section class="pane" data-pane="checkin" hidden>${t ? renderCheckinPane(t) : renderNoTripHint()}</section>
+        <section class="pane" data-pane="checkin" hidden>${t ? renderCheckinPane(t) : renderNoTripHint('打卡')}</section>
         <section class="pane" data-pane="trip" hidden>${t ? renderTripPane(t) : renderCreateSection()}</section>
+        <section class="pane" data-pane="preview" hidden>${t ? '<div id="family-embed"></div>' : renderNoTripHint('家人頁預覽')}</section>
         <section class="pane" data-pane="settings" hidden>${renderSettingsPane()}</section>
       </div>`;
 
@@ -154,7 +156,7 @@ export function renderMePage(root: HTMLElement): () => void {
       tabBtns.forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === k)));
       history.replaceState(null, '', `#${k}`);
       // 家人頁預覽（含 Leaflet 地圖）等到頁籤可見才掛載，避免在 display:none 下量到 0 尺寸
-      if (k === 'checkin' && t && !familyCleanup) mountFamilyEmbed(t);
+      if (k === 'preview' && t && !familyCleanup) mountFamilyEmbed(t);
       window.dispatchEvent(new Event('resize'));
     };
     tabBtns.forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab as Tab)));
@@ -328,14 +330,14 @@ export function renderMePage(root: HTMLElement): () => void {
       </section>`;
   };
 
-  const renderNoTripHint = (): string => `
+  const renderNoTripHint = (title: string): string => `
       <section class="card">
-        <h2>打卡</h2>
+        <h2>${esc(title)}</h2>
         <p class="muted">目前沒有進行中的行程，先到「行程管理」建立一趟。</p>
         <button type="button" data-goto="trip">前往行程管理</button>
       </section>`;
 
-  // ---- 打卡頁籤：摘要、備援打卡、照片打卡、家人頁預覽 ----
+  // ---- 打卡頁籤：摘要、備援打卡、照片打卡 ----
   const renderCheckinPane = (t: TripJson): string => `
       ${renderTripSummary(t)}
 
@@ -373,8 +375,7 @@ export function renderMePage(root: HTMLElement): () => void {
         </div>
         <p class="muted small">拍照的照片沒有 GPS，會自動改用目前定位；從圖庫選的照片會讀 EXIF 座標。上傳前會縮到 1600px。備註與「下次回報」欄位共用上方輸入。</p>
       </section>
-
-      <section class="card"><h2>家人頁預覽</h2><div id="family-embed"></div></section>`;
+`;
 
   // ---- 行程管理頁籤：摘要、航段、預告離線、家人連結、結束行程 ----
   const renderTripPane = (t: TripJson): string => `

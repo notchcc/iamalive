@@ -84,6 +84,7 @@ h2 { font-size: 17px; margin: 0 0 10px; }
 .toast.err { background: var(--bad); }
 
 .me #family-embed .clocks { margin-top: 4px; }
+.me #family-embed .page { padding: 0; }
 .landing { text-align: center; padding-top: 20vh; }
 
 /* 航段 */
