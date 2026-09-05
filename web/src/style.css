@@ -149,3 +149,7 @@ details.manual summary { cursor: pointer; font-size: 14px; }
 .big-actions button { padding: 16px; font-size: 18px; font-weight: 700; border-radius: 14px; }
 .btn-link { display: inline-block; padding: 10px 14px; border-radius: 10px; border: 1px solid var(--brand); color: var(--brand); text-decoration: none; background: #fff; }
 .login .or { margin: 10px 0 4px; }
+
+/* 本頁連結 */
+.share { margin-top: 12px; }
+.share input { font-size: 13px; }

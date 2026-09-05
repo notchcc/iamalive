@@ -6,6 +6,7 @@ import { ApiError, api } from './api';
 import { extractPhotoMeta, fmtBytes, shrinkImage } from './photo';
 import { fmtAgo, fmtBoth } from './time';
 import type { CheckinPageJson } from './types';
+import { renderShareBar } from './share';
 
 function esc(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
@@ -58,9 +59,11 @@ export function renderCheckinPage(root: HTMLElement, token: string): () => void 
           </div>
         </div>
       </section>
+      <div id="share"></div>
       <footer class="foot"><small>此頁不需登入，持有連結者即可替這趟行程打卡，請勿轉傳。<br><button id="cp-refresh" class="link" type="button">重新整理</button></small></footer>
     </div>`;
 
+  renderShareBar(root.querySelector<HTMLElement>('#share')!, `${location.origin}/c/${token}`, '在 LINE 內按「開啟」會用 Safari 開啟，再用「分享 → 加入主畫面」做成捷徑。');
   const statusEl = root.querySelector<HTMLElement>('#cp-status')!;
   const noteEl = root.querySelector<HTMLInputElement>('#cp-note')!;
   const nextEl = root.querySelector<HTMLInputElement>('#cp-next')!;

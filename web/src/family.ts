@@ -5,6 +5,7 @@ import { doc, onSnapshot } from 'firebase/firestore';
 import { firestore } from './firebase';
 import { currentFlight, effectiveDeadline, nextFlight, toWindows } from './flights';
 import { TrackLayer, createMap, placeText, renderTimeline, type TimelineOpts } from './mapview';
+import { renderShareBar } from './share';
 import { TAIPEI, fmtAgo, fmtBoth, fmtClock, fmtDate, fmtDateTime, fmtHours, sameAsTaipei, tzLabel, utcOffset } from './time';
 import type { View } from './types';
 
@@ -24,6 +25,7 @@ export function renderFamilyPage(root: HTMLElement, token: string, tlOpts: Timel
       <section class="flights" id="flights" hidden></section>
       <section class="map-wrap"><div id="map" class="map"></div></section>
       <section class="timeline"><h2>時間軸</h2><ul id="timeline"></ul></section>
+      <div id="share"></div>
       <footer class="foot"><small>此頁僅供持有連結者查看。位置由旅行者主動回報，非即時追蹤。</small></footer>
     </div>`;
 
@@ -31,6 +33,7 @@ export function renderFamilyPage(root: HTMLElement, token: string, tlOpts: Timel
   const statusEl = root.querySelector<HTMLElement>('#status')!;
   const flightsEl = root.querySelector<HTMLElement>('#flights')!;
   const timelineEl = root.querySelector<HTMLElement>('#timeline')!;
+  renderShareBar(root.querySelector<HTMLElement>('#share')!, `${location.origin}/w/${token}`, '把這條連結傳給家人即可查看；在 LINE 內按「開啟」會用瀏覽器開啟。');
   const map = createMap(root.querySelector<HTMLElement>('#map')!);
   const track = new TrackLayer(map);
 
