@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MAX_ALERTS, REPEAT_H, decideOverdue, type OverdueState } from '../src/overdue-logic.js';
+import { MAX_ALERTS, REMIND_LEAD_H, REPEAT_H, decideOverdue, decideReminder, type OverdueState } from '../src/overdue-logic.js';
 
 const H = 3_600_000;
 /** 台北 2026-09-05 12:00 = 04:00Z */
@@ -124,5 +124,44 @@ describe('decideOverdue', () => {
       expect(d.kind).toBe('repeat');
       expect(d.patch.morningResendDue).toBe(true); // 07:30 仍在安靜時段，旗標保留
     }
+  });
+});
+
+describe('decideReminder', () => {
+  const MIN = 60_000;
+  const soon = (min: number) => new Date(NOON.getTime() + min * MIN);
+
+  it('reminds when the deadline is within REMIND_LEAD_H', () => {
+    expect(decideReminder(base({ nextDeadlineAt: soon(45) }), NOON)).toEqual(soon(45));
+    expect(decideReminder(base({ nextDeadlineAt: soon(REMIND_LEAD_H * 60) }), NOON)).toEqual(soon(REMIND_LEAD_H * 60));
+  });
+
+  it('does not remind too early, after the deadline, or before startAt', () => {
+    expect(decideReminder(base({ nextDeadlineAt: soon(REMIND_LEAD_H * 60 + 1) }), NOON)).toBeNull();
+    expect(decideReminder(base({ nextDeadlineAt: soon(-1) }), NOON)).toBeNull();
+    expect(decideReminder(base({ nextDeadlineAt: soon(30), startAt: soon(10) }), NOON)).toBeNull();
+  });
+
+  it('reminds once per deadline', () => {
+    const s = base({ nextDeadlineAt: soon(45), reminderSentFor: soon(45) });
+    expect(decideReminder(s, NOON)).toBeNull();
+    // 新的期限（打卡後順延）要再提醒
+    expect(decideReminder(base({ nextDeadlineAt: soon(50), reminderSentFor: soon(45) }), NOON)).toEqual(soon(50));
+  });
+
+  it('skips announced offline and in-flight', () => {
+    expect(decideReminder(base({ nextDeadlineAt: soon(30), offlineUntil: soon(10) }), NOON)).toBeNull();
+    const dep = soon(60);
+    const arr = soon(600);
+    // 起飛前 2 小時起算飛行中 → NOON 已在窗內
+    expect(decideReminder(base({ nextDeadlineAt: soon(30), flights: [{ departAt: dep, arriveAt: arr }] }), NOON)).toBeNull();
+  });
+
+  it('uses the flight-shifted effective deadline', () => {
+    const dep = new Date(NOON.getTime() - 5 * H);
+    const arr = new Date(NOON.getTime() - 2 * H);
+    // 原期限落在飛行窗內 → 有效期限 = 降落 + 3h = NOON + 1h → 剛好在提醒範圍
+    const s = base({ nextDeadlineAt: new Date(NOON.getTime() - 4 * H), flights: [{ departAt: dep, arriveAt: arr }] });
+    expect(decideReminder(s, NOON)).toEqual(new Date(NOON.getTime() + H));
   });
 });

@@ -129,6 +129,7 @@ export async function createTrip(ownerUid: string, input: CreateTripInput): Prom
     lastAlertAt: null,
     morningResendDue: false,
     morningResent: false,
+    reminderSentFor: null,
     flights: [],
     groupReadToken,
     readTokens: [groupReadToken],

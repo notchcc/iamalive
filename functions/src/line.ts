@@ -69,6 +69,24 @@ export async function pushGroup(ownerUid: string, kind: PushKind, messages: Mess
 }
 
 /**
+ * 私訊旅人本人（LINE userId）。對方未加官方帳號好友時 LINE 會回 400，視為未送出。
+ * 與群組推播共用月額度，一則計 1。
+ */
+export async function pushUser(uid: string, kind: PushKind, messages: Message[], now = new Date()): Promise<boolean> {
+  if (!(await reserveQuota(kind, now))) {
+    logger.warn('pushUser skipped: quota', { kind });
+    return false;
+  }
+  try {
+    await client().pushMessage({ to: uid, messages: messages.slice(0, 5) });
+    return true;
+  } catch (err) {
+    logger.warn('pushUser failed (not a friend of the OA?)', { kind, uid, err: String(err) });
+    return false;
+  }
+}
+
+/**
  * 下載使用者傳給官方帳號的圖片內容。emulator 下支援 `e2e:<base64>` 假 messageId 以便測試。
  */
 export async function downloadMessageContent(messageId: string, maxBytes: number): Promise<{ data: Buffer; contentType: string } | null> {
@@ -226,6 +244,19 @@ export function alertMessages(trip: Trip, opts: AlertOpts, url: string, now = ne
   }
   msgs.push(textMsg(`${head}\n${body}`));
   return msgs;
+}
+
+/** 到期前私訊旅人的提醒。 */
+export function reminderMessages(trip: Trip, deadline: Date, now = new Date()): Message[] {
+  const mins = Math.max(1, Math.round((deadline.getTime() - now.getTime()) / 60_000));
+  return [
+    textMsg(
+      `⏰ ${trip.title}：還有約 ${mins} 分鐘到回報期限\n` +
+        `期限 ${fmtBoth(deadline, trip.travelerTz)}\n` +
+        `${lastReportLine(trip, now)}。\n\n` +
+        `請按捷徑打卡，或直接在這裡傳送「位置」或照片給我。接下來會斷線的話回覆「離線 小時數」。`,
+    ),
+  ];
 }
 
 /** 「在哪」回覆。 */

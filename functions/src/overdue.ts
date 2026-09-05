@@ -5,8 +5,9 @@ import { logger } from 'firebase-functions/v2';
 import { familyUrl } from './config.js';
 import { Timestamp, pendingPhotosCol, tripsCol } from './db.js';
 import { deletePhoto } from './photos.js';
-import { alertMessages, pushGroup } from './line.js';
-import { decideOverdue, type OverdueState } from './overdue-logic.js';
+import { alertMessages, pushGroup, pushUser, reminderMessages } from './line.js';
+import { REMIND_LEAD_H, decideOverdue, decideReminder, type OverdueState } from './overdue-logic.js';
+import { HOUR_MS } from './time.js';
 import { endTrip, syncViews } from './trips.js';
 import type { Trip } from './types.js';
 
@@ -22,6 +23,7 @@ function toState(t: Trip): OverdueState {
     lastAlertAt: t.lastAlertAt ? t.lastAlertAt.toDate() : null,
     morningResendDue: t.morningResendDue,
     morningResent: t.morningResent,
+    reminderSentFor: t.reminderSentFor ? t.reminderSentFor.toDate() : null,
   };
 }
 
@@ -36,18 +38,41 @@ export async function purgeExpiredPendingPhotos(now = new Date()): Promise<numbe
   return q.size;
 }
 
-export async function runOverdueScan(now = new Date()): Promise<{ scanned: number; alerts: number; completed: number }> {
+export interface ScanResult {
+  scanned: number;
+  alerts: number;
+  reminders: number;
+  completed: number;
+}
+
+/**
+ * 掃描 active 行程：期限已過的走警報狀態機；期限在 REMIND_LEAD_H 內的私訊旅人提醒。
+ * 查詢範圍放寬到 now + REMIND_LEAD_H，航段順延後的有效期限一定不早於原期限，所以不會漏。
+ */
+export async function runOverdueScan(now = new Date()): Promise<ScanResult> {
   await purgeExpiredPendingPhotos(now).catch(() => 0);
   const snap = await tripsCol
     .where('status', '==', 'active')
-    .where('nextDeadlineAt', '<=', Timestamp.fromDate(now))
+    .where('nextDeadlineAt', '<=', Timestamp.fromDate(new Date(now.getTime() + REMIND_LEAD_H * HOUR_MS)))
     .get();
 
   let alerts = 0;
+  let reminders = 0;
   let completed = 0;
   for (const doc of snap.docs) {
     const trip = doc.data();
-    const d = decideOverdue(toState(trip), now);
+    const state = toState(trip);
+
+    const remindFor = decideReminder(state, now);
+    if (remindFor) {
+      const sent = await pushUser(trip.ownerUid, 'reminder', reminderMessages(trip, remindFor, now), now);
+      // 送不出去（未加好友、額度）也記錄，避免每 15 分鐘重試
+      await doc.ref.update({ reminderSentFor: Timestamp.fromDate(remindFor), updatedAt: Timestamp.fromDate(now) });
+      reminders++;
+      logger.info('deadline reminder', { tripId: doc.id, sent, deadline: remindFor.toISOString() });
+    }
+
+    const d = decideOverdue(state, now);
     if (d.action === 'none') continue;
 
     if (d.action === 'complete') {
@@ -69,5 +94,5 @@ export async function runOverdueScan(now = new Date()): Promise<{ scanned: numbe
     alerts++;
     logger.info('overdue alert', { tripId: doc.id, kind: d.kind, final: d.final, sent, overdueH: d.overdueH.toFixed(2) });
   }
-  return { scanned: snap.size, alerts, completed };
+  return { scanned: snap.size, alerts, reminders, completed };
 }

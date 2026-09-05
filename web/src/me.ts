@@ -218,7 +218,8 @@ export function renderMePage(root: HTMLElement): () => void {
                </ol>
                <div class="row"><button id="bind-code">產生綁定碼</button><span id="bind-code-out" class="bind-code"></span></div>`
         }
-        <div class="muted small">本月推播 ${status.pushCount} / ${status.monthlyQuota}（${esc(status.monthKey)}，所有使用者共用）</div>
+        <div class="muted small">回報期限前 1 小時，官方帳號會私訊提醒你本人（需先加 <b>@574stmif</b> 為好友）。</div>
+        <div class="muted small">本月推播 ${status.pushCount} / ${status.monthlyQuota}（${esc(status.monthKey)}，所有使用者共用，含提醒私訊）</div>
       </section>
 
       <section class="card">

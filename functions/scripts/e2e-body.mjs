@@ -368,13 +368,28 @@ async function main() {
   const { runOverdueScan } = await import(resolve(fnDir, 'lib/overdue.js'));
 
   const tripRef = db.doc(`trips/${trip.id}`);
-  // 清掉離線、把期限設成 1 小時前；用台北 12:00 當 now
   const NOON = tpeDate('12:00');
+
+  // 到期前提醒：期限 45 分鐘後 → 私訊旅人一次；同一期限不重複；2 小時前不提醒
+  const soonDeadline = new Date(NOON.getTime() + 45 * 60_000);
+  await tripRef.update({ offlineUntil: null, reminderSentFor: null, nextDeadlineAt: Timestamp.fromDate(soonDeadline) });
+  let res = await runOverdueScan(new Date(NOON.getTime() - 2 * H));
+  assert.deepEqual(res, { scanned: 0, alerts: 0, reminders: 0, completed: 0 }, 'too early for reminder');
+  res = await runOverdueScan(NOON);
+  assert.deepEqual(res, { scanned: 1, alerts: 0, reminders: 1, completed: 0 });
+  let t = (await tripRef.get()).data();
+  assert.equal(t.reminderSentFor.toMillis(), soonDeadline.getTime());
+  assert.equal(t.alerted, false, 'reminder is not an alert');
+  res = await runOverdueScan(new Date(NOON.getTime() + 15 * 60_000));
+  assert.equal(res.reminders, 0, 'reminder only once per deadline');
+  log('deadline reminder DM ok');
+
+  // 清掉離線、把期限設成 1 小時前；用台北 12:00 當 now
   await tripRef.update({ offlineUntil: null, nextDeadlineAt: Timestamp.fromDate(new Date(NOON.getTime() - H)) });
 
-  let res = await runOverdueScan(NOON);
-  assert.deepEqual(res, { scanned: 1, alerts: 1, completed: 0 });
-  let t = (await tripRef.get()).data();
+  res = await runOverdueScan(NOON);
+  assert.deepEqual(res, { scanned: 1, alerts: 1, reminders: 0, completed: 0 });
+  t = (await tripRef.get()).data();
   assert.equal(t.alerted, true);
   assert.equal(t.alertCount, 1);
   assert.equal(t.morningResendDue, false);
@@ -484,7 +499,7 @@ async function main() {
     nextDeadlineAt: Timestamp.fromDate(new Date(Date.now() - H)),
   });
   res = await runOverdueScan(new Date());
-  assert.deepEqual(res, { scanned: 1, alerts: 0, completed: 1 });
+  assert.deepEqual(res, { scanned: 1, alerts: 0, reminders: 0, completed: 1 });
   t = (await tripRef.get()).data();
   assert.equal(t.status, 'completed');
   view = (await db.doc(`views/${trip.groupReadToken}`).get()).data();

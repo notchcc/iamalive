@@ -18,6 +18,8 @@ export const AUTO_COMPLETE_GRACE_H = 24;
 export const BOARDING_LEAD_H = 2;
 /** 降落後多久內必須回報。 */
 export const LANDING_GRACE_H = 3;
+/** 期限前多久私訊提醒旅人（每個期限最多一次）。 */
+export const REMIND_LEAD_H = 1;
 
 export interface FlightWindow {
   departAt: Date;
@@ -35,6 +37,8 @@ export interface OverdueState {
   lastAlertAt: Date | null;
   morningResendDue: boolean;
   morningResent: boolean;
+  /** 上次到期提醒對應的（有效）期限；同一期限不重複提醒。 */
+  reminderSentFor?: Date | null;
 }
 
 export type OverdueDecision =
@@ -71,6 +75,22 @@ export function effectiveDeadline(deadline: Date, flights: FlightWindow[] | unde
     }
   }
   return d;
+}
+
+/**
+ * 到期前提醒：有效期限落在 (now, now + REMIND_LEAD_H] 內、行程已開始、不在預告離線與飛行中、
+ * 且尚未針對這個期限提醒過 → 回傳該期限（呼叫端記到 reminderSentFor）；否則 null。
+ */
+export function decideReminder(s: OverdueState, now: Date): Date | null {
+  if (s.startAt.getTime() > now.getTime()) return null;
+  if (s.endAt.getTime() + AUTO_COMPLETE_GRACE_H * HOUR_MS < now.getTime()) return null;
+  const deadline = effectiveDeadline(s.nextDeadlineAt, s.flights);
+  const remaining = deadline.getTime() - now.getTime();
+  if (remaining <= 0 || remaining > REMIND_LEAD_H * HOUR_MS) return null;
+  if (s.offlineUntil && s.offlineUntil.getTime() > now.getTime()) return null;
+  if (currentFlight(s.flights, now)) return null;
+  if (s.reminderSentFor && s.reminderSentFor.getTime() === deadline.getTime()) return null;
+  return deadline;
 }
 
 export function decideOverdue(s: OverdueState, now: Date): OverdueDecision {

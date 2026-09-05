@@ -17,7 +17,7 @@
 | v0.5 | 新增**航段**（多筆，當地時間輸入），飛行中不警報、期限順延至降落後 3 小時；打卡紀錄加入**反向地理編碼城市**與經緯度；行程開始前不警報；webhook 未綁定時自動綁定首個群組 |
 | v0.6 | 新增**照片打卡**：捷徑 D（分享表單）與 `/me` 上傳，以照片 EXIF 的 GPS 與拍攝時間為打卡資訊；照片存私有 GCS bucket，家人頁經 token 驗證取圖並顯示縮圖 |
 | v0.7 | **多使用者**：`/me` 改用 **LINE Login**（session cookie），捷徑改用可撤銷的 **API 金鑰**；行程、群組綁定、金鑰皆以 LINE userId 為範圍；群組以**綁定碼**綁定；不做邀請名單（任何 LINE 帳號可登入） |
-| v0.8 | 航班查詢（AeroDataBox）預填航段；`/me` 分成**打卡 / 行程管理 / 參數設定**三個頁籤 |
+| v0.8 | 航班查詢（AeroDataBox）預填航段；`/me` 分成**打卡 / 行程管理 / 參數設定**三個頁籤；期限前 1 小時官方帳號**私訊旅人提醒** |
 
 ---
 
@@ -151,6 +151,7 @@
 | `lastAlertAt` | timestamp \| null | |
 | `morningResendDue` | boolean | 上一則警報落在安靜時段，待 08:00 補發 |
 | `morningResent` | boolean | 本期限內已補發過（每次事件最多一次） |
+| `reminderSentFor` | Timestamp \| null | 已私訊旅人「到期前提醒」的有效期限；同一期限不重複 |
 | `readTokens` | array\<string\> | 家人頁 token 清單 |
 | `createdAt` / `updatedAt` | timestamp | |
 
@@ -392,6 +393,11 @@ reply 免費，不計額度。非旅行者傳的位置訊息忽略。
 | 行程開始前 | 不警報 | 出發前的測試打卡不會觸發 |
 | `BOARDING_LEAD_H` | 2 | 起飛前多久起算飛行中 |
 | `LANDING_GRACE_H` | 3 | 降落後多久內須回報 |
+| `REMIND_LEAD_H` | 1 | 期限前多久**私訊旅人本人**提醒（每個期限一次） |
+
+### 7.1.1 到期前提醒（`decideReminder`）
+
+每次掃描一併檢查：行程已開始、有效期限（含航段順延）落在 `(now, now + REMIND_LEAD_H]`、不在預告離線與飛行中、且 `reminderSentFor` 不等於這個期限 → 以官方帳號 **push 私訊旅人（ownerUid）**，並把 `reminderSentFor` 記為該期限。掃描每 15 分鐘一次，實際送出時間為期限前 45–60 分鐘。送不出去（旅人未加官方帳號好友回 400、額度用盡）也記錄，避免重試。打卡後 `nextDeadlineAt` 改變，自然會再提醒下一個期限。不套用台北安靜時段（提醒對象是旅人自己）。
 
 每次逾時事件最多 5 則（4 則一般 + 1 則補發）。
 
@@ -519,6 +525,7 @@ export const checkOverdue = onSchedule(
 |---|---|---|---|
 | 行程開始 | `POST /api/trips` | 文字（標題、起訖、間隔、家人頁連結） | push，1 則 |
 | 預告離線 | `/offline` 或 `離線 N` 指令 | 文字「將離線至 台北 HH:mm（當地 HH:mm），期間不會警報」 | push，1 則 |
+| 到期前提醒 | `checkOverdue`，期限前 1 小時 | **私訊旅人**文字「⏰ {title}：還有約 N 分鐘到回報期限…」 | push，1 則（軟上限後略過） |
 | 逾時警報 | `checkOverdue` | 位置訊息 + 文字（含連結） | push，1 則 |
 | 早晨補發 | `checkOverdue` | 同上 | push，1 則 |
 | 恢復回報 | 警報後首次打卡 | 位置訊息 + 文字「已恢復回報 · 台北 HH:mm（當地 HH:mm）· {連結}」 | push，1 則 |
@@ -534,7 +541,7 @@ export const checkOverdue = onSchedule(
 
 ### 9.2 額度
 
-估算：一趟行程約 2 則起訖 + 0–2 則離線 + 偶發警報，**每趟約 5 則**。免費 200 則/月幾乎不可能用完。仍保留 `config/line.pushCount` 計數與 `/me` 顯示；`pushCount ≥ 190` 時只保留警報與恢復。
+估算：一趟行程約 2 則起訖 + 0–2 則離線 + 偶發警報，再加**每個期限一則到期前提醒**（12 小時間隔的 7 天行程約 14 則），**每趟約 20 則**。免費 200 則/月幾乎不可能用完。仍保留 `config/line.pushCount` 計數與 `/me` 顯示；`pushCount ≥ 190` 時只保留警報與恢復。
 
 ### 9.3 官方帳號設定（一次性）
 

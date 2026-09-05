@@ -35,6 +35,8 @@ export interface Trip {
   lastAlertAt: Timestamp | null;
   morningResendDue: boolean;
   morningResent: boolean;
+  /** 上次「到期前提醒」對應的有效期限；同一期限只私訊旅人一次。舊資料可能沒有此欄位。 */
+  reminderSentFor?: Timestamp | null;
   /** 航段（依 departAt 排序），飛行中不警報、期限順延到降落後。 */
   flights: FlightSegment[];
   /** 群組訊息內附的家人頁 token（建立行程時自動產生）。 */
@@ -127,7 +129,7 @@ export interface BindCode {
   expiresAt: Timestamp;
 }
 
-export type PushKind = 'start' | 'end' | 'offline' | 'alert' | 'recovery';
+export type PushKind = 'start' | 'end' | 'offline' | 'alert' | 'recovery' | 'reminder';
 
 /** pendingPhotos/{uid}：等待配對位置的照片（15 分鐘）。 */
 export interface PendingPhoto {
