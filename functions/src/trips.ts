@@ -226,6 +226,44 @@ export async function recordCheckin(snap: TripSnap, input: CheckinInput): Promis
   return { nextDeadlineAt, tz, pushed, recovered };
 }
 
+/**
+ * 行程中更改常態打卡頻率，並立即重算期限：
+ * - 預告離線中：期限 = 離線結束 + 新間隔（與 setOffline 一致）
+ * - 否則：期限 = max(最後打卡, 開始時間) + 新間隔；若已過現在則 = 現在 + 新間隔，避免一改就逾時
+ * 警報與到期提醒旗標歸零；不推播群組（家人頁會直接顯示新間隔與期限）。
+ */
+export async function setIntervalHours(snap: TripSnap, hours: number, now = new Date()): Promise<{ intervalHours: number; nextDeadlineAt: Date }> {
+  const trip = snap.data();
+  const startAt = trip.startAt.toDate();
+  const offlineUntil = trip.offlineUntil ? trip.offlineUntil.toDate() : null;
+  let next: Date;
+  if (offlineUntil && offlineUntil > now) {
+    next = new Date(offlineUntil.getTime() + hours * HOUR_MS);
+  } else {
+    const last = trip.lastCheckinAt ? trip.lastCheckinAt.toDate() : null;
+    const base = last && last > startAt ? last : startAt;
+    next = new Date(base.getTime() + hours * HOUR_MS);
+    if (next <= now) next = new Date(now.getTime() + hours * HOUR_MS);
+  }
+  const patch: Partial<Trip> = {
+    intervalHours: hours,
+    nextDeadlineAt: Timestamp.fromDate(next),
+    alerted: false,
+    alertCount: 0,
+    lastAlertAt: null,
+    morningResendDue: false,
+    morningResent: false,
+    reminderSentFor: null,
+    updatedAt: Timestamp.fromDate(now),
+  };
+  const updated: Trip = { ...trip, ...patch };
+  const batch = db.batch();
+  batch.update(snap.ref, patch);
+  await syncViews(snap.id, updated, { batch });
+  await batch.commit();
+  return { intervalHours: hours, nextDeadlineAt: next };
+}
+
 export async function setOffline(snap: TripSnap, hours: number): Promise<{ offlineUntil: Date; nextDeadlineAt: Date; pushed: boolean }> {
   const trip = snap.data();
   const now = new Date();

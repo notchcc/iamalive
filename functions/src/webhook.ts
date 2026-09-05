@@ -15,7 +15,7 @@ import { Timestamp, bindCodesCol, db, groupsCol, pendingPhotosCol } from './db.j
 import { downloadMessageContent, recentListMessages, reply, textMsg, verifyLineSignature, whereMessages } from './line.js';
 import { MAX_PHOTO_BYTES, deletePhoto, isAllowedImage, savePhoto } from './photos.js';
 import { fmtBoth } from './time.js';
-import { attachPhotoToLastCheckin, endTrip, getActiveTrip, recentForTrip, recordCheckin, setOffline, updateLastNote } from './trips.js';
+import { attachPhotoToLastCheckin, endTrip, getActiveTrip, recentForTrip, recordCheckin, setIntervalHours, setOffline, updateLastNote } from './trips.js';
 
 /** 照片與位置的配對窗。 */
 const PAIR_WINDOW_MS = 15 * 60_000;
@@ -73,6 +73,7 @@ const HELP_DM =
   '直接傳送「位置」給我就會記錄一次平安回報；傳照片再傳位置，會記成一筆含照片的打卡。\n' +
   '文字指令：\n' +
   '・離線 16 → 預告接下來 16 小時不會回報\n' +
+  '・頻率 6 → 之後改成每 6 小時回報，期限立即重算\n' +
   '・結束 → 結束目前行程\n' +
   '・備註 已到飯店 → 補到最後一筆打卡\n' +
   '・在哪 / 行程 → 查看最後位置與最近回報\n' +
@@ -206,6 +207,22 @@ async function handleOwnerCommand(ownerUid: string, text: string, replyToken: st
     await reply(replyToken, [textMsg(`已設定離線至 ${fmtBoth(out.offlineUntil, trip.data().travelerTz)}，期間不會警報。`)]);
     return true;
   }
+  const freq = text.match(/^頻率\s*(\d{1,2})$/);
+  if (freq) {
+    const hours = Number(freq[1]);
+    if (hours < 1 || hours > 72) {
+      await reply(replyToken, [textMsg('打卡頻率需在 1–72 小時之間。')]);
+      return true;
+    }
+    const trip = await getActiveTrip(ownerUid);
+    if (!trip) {
+      await reply(replyToken, [textMsg('目前沒有進行中的行程。')]);
+      return true;
+    }
+    const out = await setIntervalHours(trip, hours);
+    await reply(replyToken, [textMsg(`已改為每 ${hours} 小時回報，下次期限 ${fmtBoth(out.nextDeadlineAt, trip.data().travelerTz)}。`)]);
+    return true;
+  }
   if (text === '結束') {
     const trip = await getActiveTrip(ownerUid);
     if (!trip) {
@@ -331,7 +348,7 @@ async function handleEvent(ev: Event): Promise<void> {
     // 未綁定群組：只在有人試著用指令時提示，其餘靜默
     if (mev.message.type === 'text' && replyToken) {
       const t = (mev.message as webhook.TextMessageContent).text;
-      if (/在哪|平安|行程|離線|結束|備註/.test(t)) await reply(replyToken, [textMsg(HELP_UNBOUND)]);
+      if (/在哪|平安|行程|離線|頻率|結束|備註/.test(t)) await reply(replyToken, [textMsg(HELP_UNBOUND)]);
     }
     return;
   }

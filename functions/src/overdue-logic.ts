@@ -19,7 +19,8 @@ export const BOARDING_LEAD_H = 2;
 /** 降落後多久內必須回報。 */
 export const LANDING_GRACE_H = 3;
 /** 期限前多久私訊提醒旅人（每個期限最多一次）。 */
-export const REMIND_LEAD_H = 1;
+/* 75 分鐘搭配 15 分鐘掃描，提醒一定落在期限前 60–75 分鐘（至少提前一小時）。 */
+export const REMIND_LEAD_H = 1.25;
 
 export interface FlightWindow {
   departAt: Date;

@@ -17,7 +17,7 @@
 | v0.5 | 新增**航段**（多筆，當地時間輸入），飛行中不警報、期限順延至降落後 3 小時；打卡紀錄加入**反向地理編碼城市**與經緯度；行程開始前不警報；webhook 未綁定時自動綁定首個群組 |
 | v0.6 | 新增**照片打卡**：捷徑 D（分享表單）與 `/me` 上傳，以照片 EXIF 的 GPS 與拍攝時間為打卡資訊；照片存私有 GCS bucket，家人頁經 token 驗證取圖並顯示縮圖 |
 | v0.7 | **多使用者**：`/me` 改用 **LINE Login**（session cookie），捷徑改用可撤銷的 **API 金鑰**；行程、群組綁定、金鑰皆以 LINE userId 為範圍；群組以**綁定碼**綁定；不做邀請名單（任何 LINE 帳號可登入） |
-| v0.8 | 航班查詢（AeroDataBox）預填航段；`/me` 分成**打卡 / 行程管理 / 家人頁 / 參數設定**四個頁籤；期限前 1 小時官方帳號**私訊旅人提醒** |
+| v0.8 | 航班查詢（AeroDataBox）預填航段；行程中可**更改打卡頻率**（期限立即重算）；`/me` 分成**打卡 / 行程管理 / 家人頁 / 參數設定**四個頁籤；期限前 1 小時官方帳號**私訊旅人提醒** |
 
 ---
 
@@ -247,6 +247,7 @@ service cloud.firestore {
 | POST | `/api/checkin` | 打卡 | 見 5.2 |
 | POST | `/api/trips` | 建立行程 | 寫 `trips`；推「行程開始」 |
 | POST | `/api/trips/:id/end` | 結束行程 | `status = completed`，同步 views，推「行程結束」 |
+| PATCH | `/api/trips/:id` | 行程中更改 `intervalHours`（1–72）；期限立即重算為 max(最後打卡, 開始) + 新間隔（已過則現在 + 新間隔；離線中則離線結束 + 新間隔），警報與提醒旗標歸零，不推群組 | `/me` 行程管理、LINE 指令「頻率 N」 |
 | POST | `/api/trips/:id/offline` | 預告離線 | `{ hours }` → `offlineUntil`、`nextDeadlineAt = offlineUntil + interval`，推「將離線至 T」 |
 | POST | `/api/checkin/photo` | 照片打卡 | `multipart/form-data`：`photo`（檔案，≤ 8 MB，jpeg/png/heic/webp）+ `lat`、`lng`、`accuracy?`、`note?`、`nextHours?`、`takenAt?`、`clientAt?`；存入 GCS 後走與 `/checkin` 相同流程，`source = photo` |
 | GET | `/api/p/:readToken/:photoId` | 家人頁取圖 | **不需寫入 token**；驗證 `views/{readToken}` 存在且照片屬於該行程後串流回傳，`Cache-Control: private, max-age=86400` |
@@ -370,6 +371,7 @@ reply 免費，不計額度。非旅行者傳的位置訊息忽略。
 - 「用瀏覽器定位打卡」：`getCurrentPosition({ enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 })`，`source = web-gps`，此路徑有精度值。
 - 「地圖選點打卡」：定位失敗時的手動路徑，`source = manual`。
 - 建立 / 結束行程、預告離線、新增 / 撤銷家人連結、顯示群組綁定狀態與本月額度。
+- **打卡頻率**卡片（行程管理頁籤）：行程中更改間隔並立即重算期限（`PATCH /api/trips/:id`）。
 - **用照片打卡**卡片：兩個按鈕，「拍照打卡」對應 `<input type=file accept=image/* capture=environment>`（iOS 直接開相機；瀏覽器相機拍的照片沒有 GPS，自動改用目前定位，拍攝時間取現在），「選擇照片」對應不帶 `capture` 的 input（開圖庫）；瀏覽器端以 `exifr` 讀 GPS、拍攝時間、`GPSHPositioningError`，無 GPS 時可改用目前定位；`createImageBitmap` 縮圖至 1600px 後 multipart 上傳。iOS Safari 選圖是否保留 GPS EXIF 因版本而異，需實機確認。
 - **登入**：未登入只顯示「用 LINE 登入」；已登入右上顯示名稱與頭像，登出在「參數設定」。
 - **家人 LINE 群組**卡片：未綁定時顯示三步驟（邀請官方帳號、產生綁定碼、本人在群組輸入）；已綁定可解除。
@@ -394,11 +396,11 @@ reply 免費，不計額度。非旅行者傳的位置訊息忽略。
 | 行程開始前 | 不警報 | 出發前的測試打卡不會觸發 |
 | `BOARDING_LEAD_H` | 2 | 起飛前多久起算飛行中 |
 | `LANDING_GRACE_H` | 3 | 降落後多久內須回報 |
-| `REMIND_LEAD_H` | 1 | 期限前多久**私訊旅人本人**提醒（每個期限一次） |
+| `REMIND_LEAD_H` | 1.25 | 期限前多久**私訊旅人本人**提醒（每個期限一次）；搭配 15 分鐘掃描，實際落在期限前 60–75 分鐘 |
 
 ### 7.1.1 到期前提醒（`decideReminder`）
 
-每次掃描一併檢查：行程已開始、有效期限（含航段順延）落在 `(now, now + REMIND_LEAD_H]`、不在預告離線與飛行中、且 `reminderSentFor` 不等於這個期限 → 以官方帳號 **push 私訊旅人（ownerUid）**，並把 `reminderSentFor` 記為該期限。掃描每 15 分鐘一次，實際送出時間為期限前 45–60 分鐘。送不出去（旅人未加官方帳號好友回 400、額度用盡）也記錄，避免重試。打卡後 `nextDeadlineAt` 改變，自然會再提醒下一個期限。不套用台北安靜時段（提醒對象是旅人自己）。
+每次掃描一併檢查：行程已開始、有效期限（含航段順延）落在 `(now, now + REMIND_LEAD_H]`、不在預告離線與飛行中、且 `reminderSentFor` 不等於這個期限 → 以官方帳號 **push 私訊旅人（ownerUid）**，並把 `reminderSentFor` 記為該期限。掃描每 15 分鐘一次，實際送出時間為期限前 60–75 分鐘（至少提前一小時）。送不出去（旅人未加官方帳號好友回 400、額度用盡）也記錄，避免重試。打卡後 `nextDeadlineAt` 改變，自然會再提醒下一個期限。不套用台北安靜時段（提醒對象是旅人自己）。
 
 每次逾時事件最多 5 則（4 則一般 + 1 則補發）。
 

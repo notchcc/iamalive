@@ -263,6 +263,22 @@ async function main() {
   assert.ok(Math.abs(new Date(r.json.nextDeadlineAt).getTime() - (offUntil.getTime() + 12 * H)) < 60_000, 'deadline = offlineUntil + interval');
   log('offline announcement ok');
 
+  // 行程中更改頻率：離線中 → 期限 = 離線結束 + 新間隔；離線清掉後 → max(最後打卡, 開始) + 新間隔（已過則現在 + 新間隔）
+  r = await call('PATCH', `/trips/${trip.id}`, { intervalHours: 6 });
+  assert.equal(r.status, 200, JSON.stringify(r.json));
+  assert.equal(r.json.intervalHours, 6);
+  assert.ok(Math.abs(new Date(r.json.nextDeadlineAt).getTime() - (offUntil.getTime() + 6 * H)) < 60_000, 'offline: deadline = offlineUntil + new interval');
+  await db.doc(`trips/${trip.id}`).update({ offlineUntil: null });
+  r = await call('PATCH', `/trips/${trip.id}`, { intervalHours: 4 });
+  assert.equal(r.status, 200);
+  let cur = (await db.doc(`trips/${trip.id}`).get()).data();
+  assert.equal(cur.intervalHours, 4);
+  assert.ok(Math.abs(cur.nextDeadlineAt.toMillis() - (cur.lastCheckinAt.toMillis() + 4 * H)) < 60_000, 'deadline = last checkin + new interval');
+  assert.equal((await db.doc(`views/${trip.groupReadToken}`).get()).data().intervalHours, 4, 'view synced');
+  assert.equal((await call('PATCH', `/trips/${trip.id}`, { intervalHours: 0 })).status, 400);
+  assert.equal((await call('PATCH', `/trips/${trip.id}`, { intervalHours: 12 })).status, 200);
+  log('interval change recomputes deadline');
+
   // 家人連結
   r = await call('POST', `/trips/${trip.id}/watchers`, { label: '媽媽' });
   assert.equal(r.status, 201);

@@ -68,6 +68,8 @@ export const api = {
   lookupFlight: (flightNo: string, date: string) =>
     call<{ legs: FlightLegJson[] }>('GET', `/flights/lookup?flightNo=${encodeURIComponent(flightNo)}&date=${encodeURIComponent(date)}`),
   setFlights: (id: string, flights: FlightInput[]) => call<{ ok: true; flights: FlightJson[] }>('PUT', `/trips/${id}/flights`, { flights }),
+  setInterval: (id: string, hours: number) =>
+    call<{ ok: true; intervalHours: number; nextDeadlineAt: string }>('PATCH', `/trips/${id}`, { intervalHours: hours }),
   end: (id: string) => call<{ ok: true; pushed: boolean }>('POST', `/trips/${id}/end`),
   watchers: (id: string) => call<WatcherJson[]>('GET', `/trips/${id}/watchers`),
   addWatcher: (id: string, label: string) => call<{ token: string; url: string }>('POST', `/trips/${id}/watchers`, { label }),

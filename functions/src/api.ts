@@ -39,6 +39,7 @@ import {
   removeWatcher,
   requireActiveTrip,
   setFlights,
+  setIntervalHours,
   setOffline,
 } from './trips.js';
 import { fmtDateTime, isValidTz, monthKey, zonedToUtc } from './time.js';
@@ -84,6 +85,7 @@ const CreateTripSchema = z
   .refine((v) => v.endAt > v.startAt, { message: 'endAt must be after startAt' });
 
 const OfflineSchema = z.object({ hours: z.number().min(1).max(168) });
+const PatchTripSchema = z.object({ intervalHours: z.number().int().min(1).max(72) });
 
 const localDateTime = z.string().regex(/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?$/, 'YYYY-MM-DDTHH:mm');
 const tzString = z.string().min(1).max(64).refine(isValidTz, 'invalid IANA timezone');
@@ -432,6 +434,17 @@ export function createApp(): express.Express {
         pushed: result.pushed,
         recovered: result.recovered,
       });
+    }),
+  );
+
+  /** 行程中更改打卡頻率：立即重算期限（見 setIntervalHours）。 */
+  r.patch(
+    '/trips/:id',
+    wrap(async (req, res) => {
+      const { intervalHours } = PatchTripSchema.parse(req.body);
+      const trip = await requireTrip(uidOf(res), req.params.id);
+      const out = await setIntervalHours(trip, intervalHours);
+      res.json({ ok: true, intervalHours: out.intervalHours, nextDeadlineAt: out.nextDeadlineAt.toISOString() });
     }),
   );
 

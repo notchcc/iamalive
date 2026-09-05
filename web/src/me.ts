@@ -409,6 +409,12 @@ export function renderMePage(root: HTMLElement): () => void {
       </section>
 
       <section class="card">
+        <h2>打卡頻率 <span class="muted">目前每 ${t.intervalHours} 小時</span></h2>
+        <form id="interval" class="row"><input name="hours" type="number" min="1" max="72" value="${t.intervalHours}" required /><span>小時</span><button>更改並重算期限</button></form>
+        <p class="muted small">期限會立即改為「最後打卡 + 新間隔」；若已經過了，則為現在 + 新間隔。不會通知群組。</p>
+      </section>
+
+      <section class="card">
         <h2>預告離線</h2>
         <form id="offline" class="row"><input name="hours" type="number" min="1" max="168" value="16" required /><span>小時</span><button>送出</button></form>
       </section>
@@ -708,6 +714,19 @@ export function renderMePage(root: HTMLElement): () => void {
         toast(errText(e), 'err');
         photoSubmit.disabled = false;
         photoSubmit.textContent = '上傳並打卡';
+      }
+    });
+
+    root.querySelector<HTMLFormElement>('#interval')!.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const hours = Number(new FormData(e.currentTarget as HTMLFormElement).get('hours'));
+      if (hours === t.intervalHours) return;
+      try {
+        const r = await api.setInterval(t.id, hours);
+        toast(`已改為每 ${r.intervalHours} 小時，下次期限 ${fmtBoth(new Date(r.nextDeadlineAt), t.travelerTz)}`);
+        await load();
+      } catch (err) {
+        toast(errText(err), 'err');
       }
     });
 
