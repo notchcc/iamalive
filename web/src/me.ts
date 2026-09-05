@@ -1,9 +1,8 @@
 /**
- * /me 管理頁，分三個頁籤：行程管理（建立/結束、頻率、航段、預告離線）、家人頁（與家人相同的預覽，可刪除打卡）、參數設定（打卡頁與家人頁連結、群組綁定、捷徑金鑰、帳號）。
+ * /me 管理頁，分兩個頁籤：行程管理（建立/結束、頻率、航段、預告離線）、參數設定（打卡頁與家人頁連結、群組綁定、捷徑金鑰、帳號）。
  * 打卡本身不在管理頁：用 /c/{token} 打卡頁、LINE 位置訊息或捷徑。
  */
 import { ApiError, api } from './api';
-import { renderFamilyPage } from './family';
 import { getLiff } from './liff';
 import { CITY_NAMES, TAIPEI, fmtBoth, fmtDateTime, toLocalInput } from './time';
 import type { FlightInput, FlightJson, FlightLegJson, KeyJson, StatusJson, TripJson } from './types';
@@ -42,7 +41,6 @@ function toLocalInputValue(d: Date): string {
 export function renderMePage(root: HTMLElement): () => void {
   let status: StatusJson | null = null;
   let keys: KeyJson[] = [];
-  let familyCleanup: (() => void) | null = null;
 
   const toast = (msg: string, kind: 'ok' | 'err' = 'ok'): void => {
     const el = document.createElement('div');
@@ -136,10 +134,9 @@ export function renderMePage(root: HTMLElement): () => void {
     }
   };
 
-  type Tab = 'trip' | 'preview' | 'settings';
+  type Tab = 'trip' | 'settings';
   const TABS: Array<[Tab, string]> = [
     ['trip', '行程管理'],
-    ['preview', '家人頁'],
     ['settings', '參數設定'],
   ];
   const tabFromHash = (): Tab | null => {
@@ -149,8 +146,6 @@ export function renderMePage(root: HTMLElement): () => void {
 
   const renderMain = (): void => {
     if (!status) return;
-    familyCleanup?.();
-    familyCleanup = null;
 
     const t = status.activeTrip;
     const u = status.user;
@@ -164,7 +159,6 @@ export function renderMePage(root: HTMLElement): () => void {
         </nav>
 
         <section class="pane" data-pane="trip" hidden>${t ? renderTripPane(t) : renderCreateSection()}</section>
-        <section class="pane" data-pane="preview" hidden>${t ? '<div id="family-embed"></div>' : renderNoTripHint('家人頁預覽')}</section>
         <section class="pane" data-pane="settings" hidden>${renderSettingsPane()}</section>
       </div>`;
 
@@ -175,9 +169,6 @@ export function renderMePage(root: HTMLElement): () => void {
       panes.forEach((p) => (p.hidden = p.dataset.pane !== k));
       tabBtns.forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === k)));
       history.replaceState(null, '', `#${k}`);
-      // 家人頁預覽（含 Leaflet 地圖）等到頁籤可見才掛載，避免在 display:none 下量到 0 尺寸
-      if (k === 'preview' && t && !familyCleanup) mountFamilyEmbed(t);
-      window.dispatchEvent(new Event('resize'));
     };
     tabBtns.forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab as Tab)));
     root.querySelectorAll<HTMLButtonElement>('[data-goto]').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.goto as Tab)));
@@ -187,23 +178,6 @@ export function renderMePage(root: HTMLElement): () => void {
     else bindCreateSection();
 
     showTab(tabFromHash() ?? 'trip');
-  };
-
-  const mountFamilyEmbed = (t: TripJson): void => {
-    familyCleanup = renderFamilyPage(root.querySelector<HTMLElement>('#family-embed')!, t.groupReadToken, {
-      onDelete: async (it) => {
-        if (!it.id) return;
-        const what = `${it.note ? `「${it.note}」` : '這筆打卡'}${it.photoId ? '（含照片）' : ''}`;
-        if (!confirm(`刪除 ${what}？此動作無法復原。`)) return;
-        try {
-          await api.deleteCheckin(t.id, it.id);
-          toast('已刪除');
-          await load();
-        } catch (e) {
-          toast(errText(e), 'err');
-        }
-      },
-    });
   };
 
   // ---- 連結卡片（打卡頁、家人頁）：放在參數設定頁籤 ----
@@ -359,13 +333,6 @@ export function renderMePage(root: HTMLElement): () => void {
         ${t.alerted ? `<div class="bad-text">⚠️ 已發出逾時警報 ${t.alertCount} 則</div>` : ''}
       </section>`;
   };
-
-  const renderNoTripHint = (title: string): string => `
-      <section class="card">
-        <h2>${esc(title)}</h2>
-        <p class="muted">目前沒有進行中的行程，先到「行程管理」建立一趟。</p>
-        <button type="button" data-goto="trip">前往行程管理</button>
-      </section>`;
 
   // ---- 行程管理頁籤：摘要、頻率、航段、預告離線、結束行程 ----
   const renderTripPane = (t: TripJson): string => `
@@ -666,6 +633,6 @@ export function renderMePage(root: HTMLElement): () => void {
   void load();
 
   return () => {
-    familyCleanup?.();
+    /* 無需清理 */
   };
 }
