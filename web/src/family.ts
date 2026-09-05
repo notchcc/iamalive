@@ -1,14 +1,14 @@
 /**
  * 家人頁 /w/{readToken}：雙時鐘、狀態、地圖、時間軸。onSnapshot 即時更新。
  */
-import { doc, onSnapshot } from 'firebase/firestore';
+import { Timestamp, doc, onSnapshot } from 'firebase/firestore';
 import { firestore } from './firebase';
 import { currentFlight, effectiveDeadline, nextFlight, toWindows } from './flights';
 import { TrackLayer, createMap, placeText, renderTimeline, type TimelineOpts } from './mapview';
 import { renderShareBar } from './share';
 import { applyPwaIdentity } from './pwa';
 import { TAIPEI, fmtAgo, fmtBoth, fmtClock, fmtDate, fmtDateTime, fmtHours, sameAsTaipei, tzLabel, utcOffset } from './time';
-import type { View } from './types';
+import type { RecentItem, View } from './types';
 
 function esc(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
@@ -21,12 +21,12 @@ function cityTz(city: string, _tz: string): string {
 export function renderFamilyPage(root: HTMLElement, token: string, tlOpts: TimelineOpts = {}): () => void {
   root.innerHTML = `
     <div class="page family">
+      <div id="share"></div>
       <header class="clocks" id="clocks"></header>
       <section class="status" id="status"><p class="muted">載入中…</p></section>
       <section class="flights" id="flights" hidden></section>
       <section class="map-wrap"><div id="map" class="map"></div></section>
-      <section class="timeline"><h2>時間軸</h2><ul id="timeline"></ul></section>
-      <div id="share"></div>
+      <section class="timeline"><h2>時間軸</h2><ul id="timeline"></ul><div id="tl-more" class="tl-more"></div></section>
       <footer class="foot"><small>此頁僅供持有連結者查看。位置由旅行者主動回報，非即時追蹤。</small></footer>
     </div>`;
 
@@ -35,12 +35,75 @@ export function renderFamilyPage(root: HTMLElement, token: string, tlOpts: Timel
   const flightsEl = root.querySelector<HTMLElement>('#flights')!;
   const timelineEl = root.querySelector<HTMLElement>('#timeline')!;
   applyPwaIdentity('family');
-  renderShareBar(root.querySelector<HTMLElement>('#share')!, `${location.origin}/w/${token}`, '把這條連結傳給家人即可查看；在 LINE 內按「開啟」會用瀏覽器開啟。');
+  renderShareBar(root.querySelector<HTMLElement>('#share')!, `${location.origin}/w/${token}`, '把這條連結傳給家人即可查看；在 LINE 內按「開啟」會用瀏覽器開啟。', { collapsed: true });
   const map = createMap(root.querySelector<HTMLElement>('#map')!);
   const track = new TrackLayer(map);
 
   let view: View | null = null;
   let firstFit = true;
+
+  // ---- 時間軸分頁：先顯示 10 筆，捲到底再加 10 筆；view.recent（最多 100 筆，即時）用完後改向 API 取更舊的 ----
+  const PAGE = 10;
+  let shownCount = PAGE;
+  let extra: RecentItem[] = []; // 比 view.recent 最後一筆更舊的紀錄（API 取得）
+  let exhausted = false;
+  let loadingMore = false;
+  const moreEl = root.querySelector<HTMLElement>('#tl-more')!;
+  const fullList = (): RecentItem[] => {
+    if (!view) return [];
+    const seen = new Set(view.recent.map((r) => r.id));
+    return [...view.recent, ...extra.filter((e) => !seen.has(e.id))];
+  };
+  const renderTl = (): void => {
+    if (!view) return;
+    const all = fullList();
+    renderTimeline(timelineEl, all.slice(0, shownCount), new Date(), photoUrl, tlOpts);
+    const hasMore = shownCount < all.length || !exhausted;
+    moreEl.textContent = loadingMore ? '載入中…' : hasMore ? '' : all.length > PAGE ? '已顯示全部' : '';
+    moreEl.hidden = !hasMore && all.length <= PAGE;
+  };
+  const toRecent = (j: { id: string; lat: number; lng: number; acc: number | null; src: RecentItem['src']; tz: string; place: string | null; note: string; photoId: string | null; takenAt: string | null; at: string }): RecentItem => ({
+    id: j.id,
+    lat: j.lat,
+    lng: j.lng,
+    acc: j.acc,
+    src: j.src,
+    tz: j.tz,
+    place: j.place,
+    note: j.note,
+    photoId: j.photoId,
+    takenAt: j.takenAt ? Timestamp.fromDate(new Date(j.takenAt)) : null,
+    at: Timestamp.fromDate(new Date(j.at)),
+  });
+  const loadMore = async (): Promise<void> => {
+    if (!view || loadingMore) return;
+    const all = fullList();
+    if (shownCount < all.length) {
+      shownCount = Math.min(shownCount + PAGE, all.length);
+      renderTl();
+      return;
+    }
+    if (exhausted) return;
+    const last = all[all.length - 1];
+    loadingMore = true;
+    renderTl();
+    try {
+      const res = await fetch(`/api/w/${encodeURIComponent(token)}/checkins?limit=${PAGE}${last ? `&before=${encodeURIComponent(last.at.toDate().toISOString())}` : ''}`);
+      const rows = res.ok ? ((await res.json()) as Parameters<typeof toRecent>[0][]) : [];
+      if (rows.length < PAGE) exhausted = true;
+      extra = [...extra, ...rows.map(toRecent)];
+      shownCount += rows.length;
+    } catch {
+      exhausted = true;
+    } finally {
+      loadingMore = false;
+      renderTl();
+    }
+  };
+  const io = new IntersectionObserver((entries) => {
+    if (entries.some((e) => e.isIntersecting)) void loadMore();
+  });
+  io.observe(moreEl);
   const photoUrl = (id: string): string => `/api/p/${encodeURIComponent(token)}/${encodeURIComponent(id)}`;
 
   const renderClocks = (): void => {
@@ -140,7 +203,7 @@ export function renderFamilyPage(root: HTMLElement, token: string, tlOpts: Timel
     renderFlights();
     track.render(view.recent, { fit: firstFit, photoUrl });
     firstFit = false;
-    renderTimeline(timelineEl, view.recent, new Date(), photoUrl, tlOpts);
+    renderTl();
     applyPwaIdentity('family', view.title);
   };
 
@@ -150,7 +213,7 @@ export function renderFamilyPage(root: HTMLElement, token: string, tlOpts: Timel
     renderStatus();
   }, 1000);
   const agoTimer = window.setInterval(() => {
-    if (view) renderTimeline(timelineEl, view.recent, new Date(), photoUrl, tlOpts);
+    renderTl();
   }, 60_000);
 
   const unsub = onSnapshot(
@@ -173,6 +236,7 @@ export function renderFamilyPage(root: HTMLElement, token: string, tlOpts: Timel
   );
 
   return () => {
+    io.disconnect();
     window.clearInterval(clockTimer);
     window.clearInterval(agoTimer);
     unsub();

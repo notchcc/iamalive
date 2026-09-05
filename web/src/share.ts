@@ -16,8 +16,20 @@ function toast(msg: string, kind: 'ok' | 'err' = 'ok'): void {
   window.setTimeout(() => el.remove(), 4000);
 }
 
-export function renderShareBar(el: HTMLElement, url: string, hint: string): void {
-  el.innerHTML = `
+export function renderShareBar(el: HTMLElement, url: string, hint: string, opts: { collapsed?: boolean } = {}): void {
+  const short = url.replace(/^https?:\/\//, '');
+  el.innerHTML = opts.collapsed
+    ? `
+    <details class="share share-collapsed">
+      <summary><span class="lbl">本頁連結</span><span class="url">${esc(short)}</span></summary>
+      <div class="row">
+        <input id="share-url" readonly value="${esc(url)}" />
+        <button id="share-copy" class="secondary" type="button">複製</button>
+        <button id="share-open" class="secondary" type="button">開啟</button>
+      </div>
+      <p class="muted small">${esc(hint)}</p>
+    </details>`
+    : `
     <section class="card share">
       <h2>本頁連結</h2>
       <div class="row">

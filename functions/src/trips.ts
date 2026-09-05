@@ -396,6 +396,14 @@ export async function recentForTrip(tripId: string, limit = 5): Promise<RecentIt
   return loadRecent(tripId, limit);
 }
 
+/** 分頁：`before` 之前（不含）的打卡，新到舊。 */
+export async function checkinsPage(tripId: string, before: Date | null, limit: number): Promise<RecentItem[]> {
+  let q = checkinsCol(tripId).orderBy('createdAt', 'desc');
+  if (before) q = q.startAfter(Timestamp.fromDate(before));
+  const snap = await q.limit(limit).get();
+  return recentFromCheckins(snap.docs.map((d) => ({ id: d.id, data: d.data() })));
+}
+
 /** 刪除最新一筆打卡（LINE 指令用）；回傳被刪的那筆，沒有可刪回 null。 */
 export async function deleteLatestCheckin(snap: TripSnap): Promise<RecentItem | null> {
   const [latest] = await loadRecent(snap.id, 1);

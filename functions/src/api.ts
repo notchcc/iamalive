@@ -32,6 +32,7 @@ import {
   createTrip,
   deleteCheckin,
   recentForTrip,
+  checkinsPage,
   endTrip,
   resyncTrip,
   getActiveTrip,
@@ -254,6 +255,36 @@ export function createApp(): express.Express {
   );
 
   /** 家人頁取圖：以 readToken 驗證，不需寫入 token。 */
+  /** 家人頁時間軸分頁：以 readToken 驗證，回傳 `before` 之前的打卡（新到舊）。 */
+  r.get(
+    '/w/:token/checkins',
+    wrap(async (req, res) => {
+      const token = String(req.params.token);
+      if (!/^[A-Za-z0-9_-]{16,64}$/.test(token)) throw new HttpError(404, 'NOT_FOUND');
+      const view = await viewsCol.doc(token).get();
+      const tripId = view.data()?.tripId;
+      if (!tripId) throw new HttpError(404, 'NOT_FOUND');
+      const q = z.object({ before: isoDate.optional(), limit: z.coerce.number().int().min(1).max(50).default(10) }).parse(req.query);
+      res.setHeader('Cache-Control', 'no-store');
+      const items = await checkinsPage(tripId, q.before ? new Date(q.before) : null, q.limit);
+      res.json(
+        items.map((it) => ({
+          id: it.id,
+          lat: it.lat,
+          lng: it.lng,
+          acc: it.acc,
+          src: it.src,
+          tz: it.tz,
+          place: it.place ?? null,
+          note: it.note,
+          photoId: it.photoId ?? null,
+          takenAt: it.takenAt ? it.takenAt.toDate().toISOString() : null,
+          at: it.at.toDate().toISOString(),
+        })),
+      );
+    }),
+  );
+
   r.get(
     '/p/:token/:photoId',
     wrap(async (req, res) => {

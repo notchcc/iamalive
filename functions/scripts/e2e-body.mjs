@@ -304,6 +304,19 @@ async function main() {
   const cpToken = r.json.checkinToken;
   log('public checkin page token ok');
 
+  // 家人頁時間軸分頁（readToken，免登入）
+  pub = await fetch(`${BASE}/w/${trip.groupReadToken}/checkins?limit=2`);
+  assert.equal(pub.status, 200);
+  const page1 = await pub.json();
+  assert.equal(page1.length, 2);
+  assert.ok(page1[0].at > page1[1].at, 'newest first');
+  pub = await fetch(`${BASE}/w/${trip.groupReadToken}/checkins?limit=10&before=${encodeURIComponent(page1[1].at)}`);
+  const page2 = await pub.json();
+  assert.ok(page2.every((x) => x.at < page1[1].at), 'before excludes newer');
+  assert.ok(!page2.some((x) => x.id === page1[0].id || x.id === page1[1].id), 'no overlap');
+  assert.equal((await fetch(`${BASE}/w/notavalidtoken_notavalid/checkins`)).status, 404);
+  log('family timeline paging ok');
+
   // ---- 使用者隔離 ----
   const sessB = await devLogin(B_UID, '旅人 B');
   r = await call('GET', '/trips/active', undefined, sessB);
