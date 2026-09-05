@@ -4,6 +4,7 @@
 import L from 'leaflet';
 import { ApiError, api } from './api';
 import { renderFamilyPage } from './family';
+import { getLiff } from './liff';
 import { createMap } from './mapview';
 import { extractPhotoMeta, fmtBytes, shrinkImage } from './photo';
 import { CITY_NAMES, TAIPEI, fmtBoth, fmtDateTime, toLocalInput } from './time';
@@ -81,20 +82,47 @@ export function renderMePage(root: HTMLElement): () => void {
     return String((e as Error)?.message ?? e);
   };
 
-  const renderGate = (): void => {
+  const renderGate = async (): Promise<void> => {
     const q = new URLSearchParams(location.search);
     const hint = q.get('login') === 'denied' ? '你取消了 LINE 授權。' : q.get('login') === 'invalid' ? '登入連結已失效，請再試一次。' : '';
+    const liff = await getLiff();
     root.innerHTML = `
       <div class="page me">
         <h1>iamalive 管理</h1>
         <div class="card login">
           <p>用 LINE 帳號登入後即可建立行程、綁定家人群組、產生捷徑金鑰。</p>
           ${hint ? `<p class="bad-text">${esc(hint)}</p>` : ''}
-          <a class="btn-line" href="/api/auth/line/start">用 LINE 登入</a>
-          <p class="muted small">登入狀態保留 30 天。</p>
+          ${liff ? `<button id="liff-login" class="btn-line" type="button">用 LINE 登入</button>
+            <p class="muted small or">或 <a href="/api/auth/line/start">改用瀏覽器授權頁登入</a></p>` : `<a class="btn-line" href="/api/auth/line/start">用 LINE 登入</a>`}
+          <p class="muted small">登入狀態保留 30 天。從 LINE 內開啟管理頁會自動登入。</p>
         </div>
       </div>`;
+    root.querySelector('#liff-login')?.addEventListener('click', () => {
+      liff?.login({ redirectUri: `${location.origin}/me` });
+    });
   };
+
+  /** LIFF 已登入（LINE 內開啟或 liff.login 回來）→ 用 ID token 換 session cookie。 */
+  const tryLiffLogin = async (): Promise<boolean> => {
+    const liff = await getLiff();
+    if (!liff || !liff.isLoggedIn()) return false;
+    const idToken = liff.getIDToken();
+    if (!idToken) return false;
+    try {
+      await api.liffLogin(idToken);
+      return true;
+    } catch (e) {
+      // ID token 過期或無效：清掉 LIFF 登入狀態，讓使用者重新登入拿新 token
+      console.warn('liff login exchange failed', e);
+      try {
+        liff.logout();
+      } catch {
+        /* ignore */
+      }
+      return false;
+    }
+  };
+  let liffTried = false;
 
   const load = async (): Promise<void> => {
     try {
@@ -103,7 +131,11 @@ export function renderMePage(root: HTMLElement): () => void {
       renderMain();
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) {
-        renderGate();
+        if (!liffTried) {
+          liffTried = true;
+          if (await tryLiffLogin()) return load();
+        }
+        await renderGate();
       } else {
         toast(errText(e), 'err');
       }
@@ -243,7 +275,16 @@ export function renderMePage(root: HTMLElement): () => void {
   const bindSettingsPane = (): void => {
     root.querySelector('#logout')!.addEventListener('click', async () => {
       await api.logout().catch(() => undefined);
-      renderGate();
+      const liff = await getLiff();
+      if (liff?.isLoggedIn()) {
+        try {
+          liff.logout();
+        } catch {
+          /* ignore */
+        }
+      }
+      liffTried = true; // 登出後不要又自動用 LIFF 登回去
+      await renderGate();
     });
     root.querySelector('#unbind')?.addEventListener('click', async () => {
       if (!confirm('確定解除 LINE 群組綁定？之後重新產生綁定碼即可重綁。')) return;
@@ -406,6 +447,13 @@ export function renderMePage(root: HTMLElement): () => void {
           <button type="submit">新增航段</button>
         </form>
         </details>
+      </section>
+
+      <section class="card">
+        <h2>打卡頁 <span class="muted">免登入，加到主畫面當捷徑</span></h2>
+        <div class="row"><input id="checkin-url" readonly value="${esc(t.checkinUrl ?? '')}" /><button id="copy-checkin-url" class="secondary" type="button">複製</button><a class="btn-link" href="${esc(t.checkinUrl ?? '#')}" target="_blank" rel="noopener">開啟</a></div>
+        <p class="muted small">iPhone：用 Safari 開啟連結 → 分享 → 加入主畫面，之後點圖示就能定位或拍照打卡。持有連結的人都能替這趟行程打卡，外洩就按輪替。</p>
+        <button id="rotate-checkin" class="danger" type="button">輪替連結（舊連結失效）</button>
       </section>
 
       <section class="card">
@@ -714,6 +762,25 @@ export function renderMePage(root: HTMLElement): () => void {
         toast(errText(e), 'err');
         photoSubmit.disabled = false;
         photoSubmit.textContent = '上傳並打卡';
+      }
+    });
+
+    root.querySelector('#copy-checkin-url')!.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(t.checkinUrl ?? '');
+        toast('已複製');
+      } catch {
+        toast('無法複製，請手動選取', 'err');
+      }
+    });
+    root.querySelector('#rotate-checkin')!.addEventListener('click', async () => {
+      if (!confirm('輪替打卡頁連結？已加到主畫面的舊捷徑會失效，要重新加入。')) return;
+      try {
+        await api.rotateCheckinToken(t.id);
+        toast('已產生新連結');
+        await load();
+      } catch (err) {
+        toast(errText(err), 'err');
       }
     });
 

@@ -279,6 +279,31 @@ async function main() {
   assert.equal((await call('PATCH', `/trips/${trip.id}`, { intervalHours: 12 })).status, 200);
   log('interval change recomputes deadline');
 
+  // ---- 免登入打卡頁 /c/{token}：不帶任何憑證 ----
+  assert.ok(trip.checkinToken && trip.checkinUrl.endsWith(`/c/${trip.checkinToken}`), 'trip has checkin token');
+  const JSON_H = { 'content-type': 'application/json' };
+  let pub = await fetch(`${BASE}/c/${trip.checkinToken}`);
+  assert.equal(pub.status, 200);
+  let pj = await pub.json();
+  assert.equal(pj.title, trip.title);
+  assert.equal(pj.checkinToken, undefined, 'public json must not leak tokens');
+  assert.equal(pj.familyUrl, undefined);
+  pub = await fetch(`${BASE}/c/${trip.checkinToken}/checkin`, { method: 'POST', headers: JSON_H, body: JSON.stringify({ lat: 35.68, lng: 139.76, source: 'web-gps', note: '免登入' }) });
+  const pubText = await pub.text();
+  assert.equal(pub.status, 200, pubText);
+  pj = JSON.parse(pubText);
+  assert.equal(pj.tz, 'Asia/Tokyo');
+  assert.equal((await fetch(`${BASE}/c/${trip.checkinToken}/checkin`, { method: 'POST', headers: JSON_H, body: '{"lat":999,"lng":0}' })).status, 400);
+  assert.equal((await fetch(`${BASE}/c/nottherighttoken_0000`)).status, 404);
+  assert.equal((await fetch(`${BASE}/c/short`)).status, 404);
+  r = await call('POST', `/trips/${trip.id}/checkin-token/rotate`);
+  assert.equal(r.status, 200);
+  assert.notEqual(r.json.checkinToken, trip.checkinToken);
+  assert.equal((await fetch(`${BASE}/c/${trip.checkinToken}`)).status, 404, 'old token dead after rotate');
+  assert.equal((await fetch(`${BASE}/c/${r.json.checkinToken}`)).status, 200);
+  const cpToken = r.json.checkinToken;
+  log('public checkin page token ok');
+
   // 家人連結
   r = await call('POST', `/trips/${trip.id}/watchers`, { label: '媽媽' });
   assert.equal(r.status, 201);
@@ -287,7 +312,7 @@ async function main() {
   assert.equal(r.json.length, 2);
   view = (await db.doc(`views/${momToken}`).get()).data();
   assert.equal(view.label, '媽媽');
-  assert.equal(view.recent.length, 2, 'new watcher gets existing history');
+  assert.equal(view.recent.length, 3, 'new watcher gets existing history'); // 東京、nextHours、免登入各一筆（照片那筆已刪）
   r = await call('DELETE', `/trips/${trip.id}/watchers/${momToken}`);
   assert.equal(r.status, 200);
   assert.equal((await db.doc(`views/${momToken}`).get()).exists, false);
@@ -521,6 +546,7 @@ async function main() {
   view = (await db.doc(`views/${trip.groupReadToken}`).get()).data();
   assert.equal(view.status, 'completed');
   log('auto-complete 24h after endAt');
+  assert.equal((await fetch(`${BASE}/c/${cpToken}`)).status, 410, 'ended trip → 410 on checkin page');
 
   r = await call('GET', '/trips/active');
   assert.equal(r.status, 404);

@@ -33,3 +33,17 @@ export function familyUrl(readToken: string): string {
   const base = PUBLIC_BASE_URL.value().replace(/\/+$/, '');
   return `${base}/w/${readToken}`;
 }
+
+/** 免登入打卡頁（旅人加到主畫面用）。 */
+export function checkinUrl(token: string): string {
+  const base = PUBLIC_BASE_URL.value().replace(/\/+$/, '');
+  return `${base}/c/${token}`;
+}
+
+/** LIFF app ID（LINE Login channel 底下、endpoint 為 /me）。空字串表示未設定。 */
+export const LIFF_ID = defineString('LIFF_ID', { default: '' });
+
+export function liffUrl(): string | null {
+  const id = LIFF_ID.value();
+  return id ? `https://liff.line.me/${id}` : null;
+}

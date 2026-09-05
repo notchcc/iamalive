@@ -81,7 +81,23 @@ export interface TripJson {
   alertCount: number;
   groupReadToken: string;
   familyUrl: string;
+  /** 免登入打卡頁 token / 連結。 */
+  checkinToken: string | null;
+  checkinUrl: string | null;
   flights: FlightJson[];
+}
+
+/** 免登入打卡頁 GET /api/c/{token} 回傳。 */
+export interface CheckinPageJson {
+  title: string;
+  status: 'active' | 'completed';
+  intervalHours: number;
+  travelerTz: string;
+  lastCheckinAt: string | null;
+  lastCheckinPlace: string | null;
+  nextDeadlineAt: string | null;
+  offlineUntil: string | null;
+  alerted: boolean;
 }
 
 export interface UserJson {

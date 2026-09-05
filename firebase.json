@@ -44,6 +44,19 @@
             "value": "no-store"
           }
         ]
+      },
+      {
+        "source": "/c/**",
+        "headers": [
+          {
+            "key": "Referrer-Policy",
+            "value": "same-origin"
+          },
+          {
+            "key": "Cache-Control",
+            "value": "no-store"
+          }
+        ]
       }
     ]
   },

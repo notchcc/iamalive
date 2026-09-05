@@ -6,7 +6,7 @@ import { randomInt } from 'node:crypto';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { logger } from 'firebase-functions/v2';
 import { z } from 'zod';
-import { familyUrl } from './config.js';
+import { checkinUrl, familyUrl } from './config.js';
 import { Timestamp, bindCodesCol, getLineConfig, groupIdForOwner, groupsCol, tripsCol, usersCol } from './db.js';
 import { MONTHLY_QUOTA } from './line.js';
 import {
@@ -15,6 +15,7 @@ import {
   isEmulator,
   lineAuthorizeUrl,
   lineExchangeCode,
+  lineVerifyIdToken,
   listApiKeys,
   makeState,
   requireAuth,
@@ -41,6 +42,9 @@ import {
   setFlights,
   setIntervalHours,
   setOffline,
+  ensureCheckinToken,
+  rotateCheckinToken,
+  getTripByCheckinToken,
 } from './trips.js';
 import { fmtDateTime, isValidTz, monthKey, zonedToUtc } from './time.js';
 import type { FlightSegment } from './types.js';
@@ -154,7 +158,88 @@ function tripJson(id: string, t: FirebaseFirestore.DocumentData) {
     alertCount: t.alertCount,
     groupReadToken: t.groupReadToken,
     familyUrl: familyUrl(t.groupReadToken),
+    checkinToken: t.checkinToken ?? null,
+    checkinUrl: t.checkinToken ? checkinUrl(t.checkinToken) : null,
   };
+}
+
+/** 免登入打卡頁看得到的行程資訊（不含 token、家人連結）。 */
+function checkinPageJson(t: FirebaseFirestore.DocumentData) {
+  const ts = (v: Timestamp | null | undefined) => (v ? v.toDate().toISOString() : null);
+  return {
+    title: t.title,
+    status: t.status,
+    intervalHours: t.intervalHours,
+    travelerTz: t.travelerTz,
+    lastCheckinAt: ts(t.lastCheckinAt),
+    lastCheckinPlace: t.lastCheckinPlace ?? null,
+    nextDeadlineAt: ts(t.nextDeadlineAt),
+    offlineUntil: ts(t.offlineUntil),
+    alerted: t.alerted,
+  };
+}
+
+type ActiveTripSnap = FirebaseFirestore.QueryDocumentSnapshot<import('./types.js').Trip>;
+
+/** JSON 打卡（登入 / 金鑰 / 打卡頁 token 三條路共用）。 */
+async function jsonCheckin(trip: ActiveTripSnap, body: unknown) {
+  const input = CheckinSchema.parse(body);
+  const result = await recordCheckin(trip, {
+    lat: input.lat,
+    lng: input.lng,
+    accuracy: input.accuracy ?? null,
+    source: input.source,
+    note: input.note,
+    nextHours: input.nextHours ?? null,
+    clientAt: input.clientAt ?? null,
+  });
+  return { ok: true as const, nextDeadlineAt: result.nextDeadlineAt.toISOString(), tz: result.tz, pushed: result.pushed, recovered: result.recovered };
+}
+
+/** 照片打卡：multipart/form-data，欄位 photo（檔案）+ lat/lng/note/nextHours/takenAt。 */
+async function photoCheckin(req: Request, trip: ActiveTripSnap) {
+  let parsed;
+  try {
+    parsed = await parseMultipart(req, MAX_PHOTO_BYTES);
+  } catch (e) {
+    throw new HttpError(String((e as Error).message) === 'FILE_TOO_LARGE' ? 413 : 400, String((e as Error).message));
+  }
+  if (!parsed.file || parsed.file.data.length === 0) throw new HttpError(400, 'PHOTO_REQUIRED');
+  if (!isAllowedImage(parsed.file.mimeType)) throw new HttpError(415, 'UNSUPPORTED_IMAGE_TYPE');
+  const f = PhotoFieldsSchema.parse(parsed.fields);
+  const photoId = await savePhoto(trip.id, parsed.file.data, parsed.file.mimeType);
+  const result = await recordCheckin(trip, {
+    lat: f.lat,
+    lng: f.lng,
+    accuracy: f.accuracy ?? null,
+    source: 'photo',
+    note: f.note,
+    nextHours: f.nextHours ?? null,
+    clientAt: f.clientAt ?? null,
+    photoId,
+    takenAt: f.takenAt ?? null,
+  });
+  return { ok: true as const, photoId, nextDeadlineAt: result.nextDeadlineAt.toISOString(), tz: result.tz, pushed: result.pushed, recovered: result.recovered };
+}
+
+const CHECKIN_TOKEN_RE = /^[A-Za-z0-9_-]{16,64}$/;
+
+/** 打卡頁 token → active 行程；找不到 404、已結案 410。 */
+async function requireTripByCheckinToken(token: string): Promise<ActiveTripSnap> {
+  if (!CHECKIN_TOKEN_RE.test(token)) throw new HttpError(404, 'TRIP_NOT_FOUND');
+  const snap = await getTripByCheckinToken(token);
+  if (!snap) throw new HttpError(404, 'TRIP_NOT_FOUND');
+  if (snap.data().status !== 'active') throw new HttpError(410, 'TRIP_ENDED');
+  return snap as ActiveTripSnap;
+}
+
+/** 同站檢查（cookie 相關的公開端點用）。 */
+function assertSameSite(req: Request): void {
+  const site = req.header('sec-fetch-site');
+  const origin = req.header('origin');
+  const host = req.header('x-forwarded-host') ?? req.header('host') ?? '';
+  const sameOrigin = origin ? new URL(origin).host === host : true;
+  if ((site && site !== 'same-origin' && site !== 'none') || !sameOrigin) throw new HttpError(403, 'CSRF');
 }
 
 export function createApp(): express.Express {
@@ -227,6 +312,44 @@ export function createApp(): express.Express {
     }),
   );
 
+  /** LIFF：前端 liff.getIDToken() → 驗證 → 同一種 session cookie。 */
+  r.post(
+    '/auth/liff',
+    wrap(async (req, res) => {
+      assertSameSite(req);
+      const { idToken } = z.object({ idToken: z.string().min(20).max(4096) }).parse(req.body);
+      const profile = await lineVerifyIdToken(idToken);
+      await upsertUser(profile);
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('Set-Cookie', sessionCookie(signSession(profile.userId, profile.displayName), SESSION_DAYS * 86400));
+      res.json({ ok: true, uid: profile.userId, displayName: profile.displayName, pictureUrl: profile.pictureUrl });
+    }),
+  );
+
+  // ---------- 免登入打卡頁 /c/{token}（能力型 token，僅能看該行程摘要與打卡） ----------
+  r.get(
+    '/c/:token',
+    wrap(async (req, res) => {
+      res.setHeader('Cache-Control', 'no-store');
+      const snap = await requireTripByCheckinToken(req.params.token);
+      res.json(checkinPageJson(snap.data()));
+    }),
+  );
+  r.post(
+    '/c/:token/checkin',
+    wrap(async (req, res) => {
+      const snap = await requireTripByCheckinToken(req.params.token);
+      res.json(await jsonCheckin(snap, req.body));
+    }),
+  );
+  r.post(
+    '/c/:token/checkin/photo',
+    wrap(async (req, res) => {
+      const snap = await requireTripByCheckinToken(req.params.token);
+      res.json(await photoCheckin(req, snap));
+    }),
+  );
+
   r.post(
     '/auth/logout',
     wrap(async (_req, res) => {
@@ -271,13 +394,14 @@ export function createApp(): express.Express {
       ]);
       const key = monthKey(new Date());
       const auth = res.locals.auth as AuthInfo;
+      const checkinToken = active ? await ensureCheckinToken(active) : null;
       res.json({
         user: { uid, kind: auth.kind, displayName: user.data()?.displayName ?? null, pictureUrl: user.data()?.pictureUrl ?? null },
         groupBound: Boolean(groupId),
         monthKey: key,
         pushCount: cfg.monthKey === key ? cfg.pushCount : 0,
         monthlyQuota: MONTHLY_QUOTA,
-        activeTrip: active ? tripJson(active.id, active.data()) : null,
+        activeTrip: active ? tripJson(active.id, { ...active.data(), checkinToken }) : null,
       });
     }),
   );
@@ -379,61 +503,26 @@ export function createApp(): express.Express {
   r.post(
     '/checkin',
     wrap(async (req, res) => {
-      const input = CheckinSchema.parse(req.body);
       const trip = await requireActiveTrip(uidOf(res));
-      const result = await recordCheckin(trip, {
-        lat: input.lat,
-        lng: input.lng,
-        accuracy: input.accuracy ?? null,
-        source: input.source,
-        note: input.note,
-        nextHours: input.nextHours ?? null,
-        clientAt: input.clientAt ?? null,
-      });
-      res.json({
-        ok: true,
-        nextDeadlineAt: result.nextDeadlineAt.toISOString(),
-        tz: result.tz,
-        pushed: result.pushed,
-        recovered: result.recovered,
-      });
+      res.json(await jsonCheckin(trip, req.body));
     }),
   );
 
-  /** 照片打卡：multipart/form-data，欄位 photo（檔案）+ lat/lng/note/nextHours/takenAt。 */
   r.post(
     '/checkin/photo',
     wrap(async (req, res) => {
-      let parsed;
-      try {
-        parsed = await parseMultipart(req, MAX_PHOTO_BYTES);
-      } catch (e) {
-        throw new HttpError(String((e as Error).message) === 'FILE_TOO_LARGE' ? 413 : 400, String((e as Error).message));
-      }
-      if (!parsed.file || parsed.file.data.length === 0) throw new HttpError(400, 'PHOTO_REQUIRED');
-      if (!isAllowedImage(parsed.file.mimeType)) throw new HttpError(415, 'UNSUPPORTED_IMAGE_TYPE');
-      const f = PhotoFieldsSchema.parse(parsed.fields);
       const trip = await requireActiveTrip(uidOf(res));
-      const photoId = await savePhoto(trip.id, parsed.file.data, parsed.file.mimeType);
-      const result = await recordCheckin(trip, {
-        lat: f.lat,
-        lng: f.lng,
-        accuracy: f.accuracy ?? null,
-        source: 'photo',
-        note: f.note,
-        nextHours: f.nextHours ?? null,
-        clientAt: f.clientAt ?? null,
-        photoId,
-        takenAt: f.takenAt ?? null,
-      });
-      res.json({
-        ok: true,
-        photoId,
-        nextDeadlineAt: result.nextDeadlineAt.toISOString(),
-        tz: result.tz,
-        pushed: result.pushed,
-        recovered: result.recovered,
-      });
+      res.json(await photoCheckin(req, trip));
+    }),
+  );
+
+  /** 輪替免登入打卡頁 token：舊的主畫面捷徑立即失效。 */
+  r.post(
+    '/trips/:id/checkin-token/rotate',
+    wrap(async (req, res) => {
+      const trip = await requireTrip(uidOf(res), req.params.id);
+      const token = await rotateCheckinToken(trip);
+      res.json({ ok: true, checkinToken: token, checkinUrl: checkinUrl(token) });
     }),
   );
 

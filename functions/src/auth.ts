@@ -161,11 +161,16 @@ export async function lineExchangeCode(code: string): Promise<LineProfile> {
   }
   const tok = (await tokenRes.json()) as { id_token?: string };
   if (!tok.id_token) throw new HttpError(401, 'LINE_NO_ID_TOKEN');
+  return lineVerifyIdToken(tok.id_token);
+}
 
+/** 驗 LINE ID token（含 aud）→ 使用者資料。LIFF 的 liff.getIDToken() 與網頁授權碼流程共用。 */
+export async function lineVerifyIdToken(idToken: string): Promise<LineProfile> {
+  const clientId = LINE_LOGIN_CHANNEL_ID.value();
   const verifyRes = await fetch('https://api.line.me/oauth2/v2.1/verify', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ id_token: tok.id_token, client_id: clientId }),
+    body: new URLSearchParams({ id_token: idToken, client_id: clientId }),
   });
   if (!verifyRes.ok) {
     logger.warn('line id token verify failed', { status: verifyRes.status, body: await verifyRes.text() });

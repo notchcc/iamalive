@@ -2,7 +2,7 @@
 
 | 項目 | 內容 |
 |---|---|
-| 文件版本 | v0.8 |
+| 文件版本 | v0.9 |
 | 日期 | 2026-09-04 |
 | 狀態 | 設計定稿，待決事項已全部定案，可進入開發 |
 
@@ -17,6 +17,7 @@
 | v0.5 | 新增**航段**（多筆，當地時間輸入），飛行中不警報、期限順延至降落後 3 小時；打卡紀錄加入**反向地理編碼城市**與經緯度；行程開始前不警報；webhook 未綁定時自動綁定首個群組 |
 | v0.6 | 新增**照片打卡**：捷徑 D（分享表單）與 `/me` 上傳，以照片 EXIF 的 GPS 與拍攝時間為打卡資訊；照片存私有 GCS bucket，家人頁經 token 驗證取圖並顯示縮圖 |
 | v0.7 | **多使用者**：`/me` 改用 **LINE Login**（session cookie），捷徑改用可撤銷的 **API 金鑰**；行程、群組綁定、金鑰皆以 LINE userId 為範圍；群組以**綁定碼**綁定；不做邀請名單（任何 LINE 帳號可登入） |
+| v0.9 | `/me` 改以 **LIFF** 登入（LINE 內自動登入，`POST /api/auth/liff`），瀏覽器授權碼流程保留；每趟行程一個**免登入打卡頁** `/c/{token}`（PWA 主畫面捷徑，可輪替） |
 | v0.8 | 航班查詢（AeroDataBox）預填航段；行程中可**更改打卡頻率**（期限立即重算）；`/me` 分成**打卡 / 行程管理 / 家人頁 / 參數設定**四個頁籤；期限前 1 小時官方帳號**私訊旅人提醒** |
 
 ---
@@ -107,6 +108,7 @@
 | 角色 | 憑證 | 用途 | 儲存位置 |
 |---|---|---|---|
 | 旅行者（網頁） | LINE Login → session JWT（HS256，30 天）放在 `__session` cookie | `/me` 全部操作 | HttpOnly cookie（Hosting 只轉送此名稱的 cookie） |
+| 旅行者（主畫面捷徑 / PWA） | 打卡頁 token `trips.checkinToken`（能力型，每趟行程一個，可輪替） | `/c/{token}` 看該行程摘要、定位 / 照片打卡 | 連結網址（加到 iPhone 主畫面） |
 | 旅行者（捷徑） | API 金鑰 `ak_…`（`X-Api-Key`），每人最多 10 把、可個別撤銷 | 打卡、預告離線 | 捷徑；伺服器只存 SHA-256 雜湊 `apiKeys/{hash}` |
 | 旅行者（LINE 群組） | 群組綁定 `groups/{groupId}.ownerUid` | 位置訊息打卡、`離線 / 結束 / 備註` 指令 | 由「綁定 123456」建立 |
 | 家人（網頁） | `readToken`（Firestore 文件 ID） | 讀取 `views/{readToken}` 與照片 | 連結網址 |
@@ -115,6 +117,8 @@
 | LINE Login | `LINE_LOGIN_CHANNEL_ID`（env）、`LINE_LOGIN_CHANNEL_SECRET`、`SESSION_SECRET` | 授權碼交換、驗 ID token、簽 session | Secret |
 
 登入流程：`GET /api/auth/line/start`（簽章 `state`，10 分鐘）→ LINE 授權 → `GET /api/auth/line/callback` 以 channel secret 換 token、呼叫 LINE verify 端點驗 ID token 與 `aud` → upsert `users/{userId}` → 設 cookie → 導回 `/me`。cookie 身分的變更請求需同站（`Sec-Fetch-Site` / `Origin` 檢查）。**LINE Login channel 與 Messaging API channel 必須在同一個 Provider**，userId 才一致。
+
+**LIFF（主要路徑）**：同一個 LINE Login channel 底下建一個 LIFF app（endpoint `https://<host>/me`，scope `openid profile`，bot prompt `normal`），ID 放 `web` 的 `VITE_LIFF_ID` 與 functions 的 `LIFF_ID`。`/me` 載入時 `liff.init`；從 LINE 內開啟（`https://liff.line.me/{LIFF_ID}`）會自動登入，外部瀏覽器則按鈕呼叫 `liff.login()`。取得 `liff.getIDToken()` 後 `POST /api/auth/liff {idToken}`（同站檢查）→ 同一個 LINE verify 端點驗 `aud` → 發同一種 session cookie。ID token 過期或無效時前端 `liff.logout()` 回到登入畫面。原本的授權碼流程保留為「改用瀏覽器授權頁登入」。
 
 ---
 
@@ -235,6 +239,7 @@ service cloud.firestore {
 |---|---|---|
 | GET | `/api/auth/line/start` | 導向 LINE 授權 |
 | GET | `/api/auth/line/callback` | 授權回呼，設 cookie 後導回 `/me` |
+| POST | `/api/auth/liff` | LIFF ID token → session cookie（公開端點，同站檢查） |
 | POST | `/api/auth/logout` | 清 cookie |
 | GET | `/api/auth/me` | 目前身分（uid、kind、名稱、頭像） |
 | GET / POST / DELETE | `/api/keys[/:id]` | 列出 / 產生（明文只回一次）/ 撤銷金鑰 |
@@ -250,6 +255,10 @@ service cloud.firestore {
 | PATCH | `/api/trips/:id` | 行程中更改 `intervalHours`（1–72）；期限立即重算為 max(最後打卡, 開始) + 新間隔（已過則現在 + 新間隔；離線中則離線結束 + 新間隔），警報與提醒旗標歸零，不推群組 | `/me` 行程管理、LINE 指令「頻率 N」 |
 | POST | `/api/trips/:id/offline` | 預告離線 | `{ hours }` → `offlineUntil`、`nextDeadlineAt = offlineUntil + interval`，推「將離線至 T」 |
 | POST | `/api/checkin/photo` | 照片打卡 | `multipart/form-data`：`photo`（檔案，≤ 8 MB，jpeg/png/heic/webp）+ `lat`、`lng`、`accuracy?`、`note?`、`nextHours?`、`takenAt?`、`clientAt?`；存入 GCS 後走與 `/checkin` 相同流程，`source = photo` |
+| GET | `/api/c/:token` | 打卡頁摘要 | **不需登入**；以 `checkinToken` 找行程，回 title / 間隔 / 最後回報 / 期限 / 離線，不含任何 token 或連結；找不到 404、已結案 410 |
+| POST | `/api/c/:token/checkin` | 打卡頁 JSON 打卡 | 同 `/api/checkin` 的 body 與回應 |
+| POST | `/api/c/:token/checkin/photo` | 打卡頁照片打卡 | 同 `/api/checkin/photo` |
+| POST | `/api/trips/:id/checkin-token/rotate` | 輪替打卡頁 token | 舊連結立即 404 |
 | GET | `/api/p/:readToken/:photoId` | 家人頁取圖 | **不需寫入 token**；驗證 `views/{readToken}` 存在且照片屬於該行程後串流回傳，`Cache-Control: private, max-age=86400` |
 | GET | `/api/flights/lookup?flightNo=BR61&date=YYYY-MM-DD` | 航班查詢 | AeroDataBox（RapidAPI，Secret `RAPIDAPI_KEY`）；回傳各航段的 IATA、城市、**機場時區**、表定當地與 UTC 時間；以「班號_日期」快取 12 小時；未設金鑰回 503 |
 | PUT | `/api/trips/:id/flights` | 整批更新航段 | `{ flights: [{ flightNo, fromCity, fromTz, departLocal, toCity, toTz, arriveLocal }] }`，`*Local` 為 `YYYY-MM-DDTHH:mm` 當地時間；驗證時區有效、降落晚於起飛、單段 ≤ 30 小時 |
@@ -378,6 +387,14 @@ reply 免費，不計額度。非旅行者傳的位置訊息忽略。
 - **捷徑金鑰**卡片：列表（標籤、前 8 碼、建立與最後使用時間）、產生（只顯示一次、複製）、撤銷。
 - **航段**卡片：先以「航班號碼 + 出發日期」查詢，列出各航段勾選加入（城市與時區自動帶入，多段航班一次加入）；手動輸入收合在下方備用；新增表單含航班號碼、起飛城市 / 時區 / 當地時間、降落城市 / 時區 / 當地時間；時區欄為 datalist（常用城市中文對照），選時區自動帶入城市名，新增後下一段的起飛欄自動帶入上一段目的地。
 - 內嵌與家人頁相同的地圖與時間軸元件（自用回顧）。
+- **打卡頁**卡片（行程管理頁籤）：顯示 `/c/{token}` 連結、複製、開啟、輪替，附「加入主畫面」說明。
+
+### 6.4 打卡頁 `/c/{token}`（免登入，主畫面捷徑 / PWA）
+
+- 每趟行程建立時產生 `checkinToken`（與 readToken 同格式，22 字元 URL-safe）；舊行程在 `/status` 讀取時補上。
+- 頁面：狀態卡（最後回報多久前、地點、下次期限、離線）、備註與下次回報欄、三個大按鈕「定位打卡 / 拍照打卡 / 選擇照片」。拍照走 `capture=environment`，沒有 GPS 時自動改用目前定位。頁面可見（切回前景）時自動重新整理，30 秒更新「多久前」。
+- 站台附 `manifest.webmanifest`（`display: standalone`、不設 `start_url`，iOS 以加入時的網址為起點）與 `apple-touch-icon`，加到主畫面後以獨立視窗開啟。
+- 安全性：token 即能力，持有者只能看該行程摘要與打卡，不能改行程、看不到家人連結與照片；`/c/**` 加 `Referrer-Policy: same-origin` 與 `no-store`；外洩時在 `/me` 輪替。
 
 ---
 

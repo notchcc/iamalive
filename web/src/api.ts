@@ -1,4 +1,4 @@
-import type { FlightInput, FlightJson, FlightLegJson, KeyJson, StatusJson, TripJson, UserJson, WatcherJson } from './types';
+import type { CheckinPageJson, FlightInput, FlightJson, FlightLegJson, KeyJson, StatusJson, TripJson, UserJson, WatcherJson } from './types';
 
 export class ApiError extends Error {
   constructor(
@@ -28,8 +28,49 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
   return (await res.json()) as T;
 }
 
+async function callForm<T>(path: string, form: FormData): Promise<T> {
+  const res = await fetch(`/api${path}`, { method: 'POST', credentials: 'same-origin', body: form });
+  if (!res.ok) {
+    let code = res.statusText;
+    try {
+      code = ((await res.json()) as { error?: string }).error ?? code;
+    } catch {
+      /* ignore */
+    }
+    throw new ApiError(res.status, code);
+  }
+  return (await res.json()) as T;
+}
+
+export interface CheckinBody {
+  lat: number;
+  lng: number;
+  accuracy?: number | null;
+  source: 'web-gps' | 'manual';
+  note?: string;
+  nextHours?: number | null;
+  clientAt?: string;
+}
+export interface CheckinResult {
+  ok: true;
+  nextDeadlineAt: string;
+  tz: string;
+  pushed: boolean;
+  recovered: boolean;
+}
+
 export const api = {
   me: () => call<UserJson>('GET', '/auth/me'),
+  /** LIFF：以 liff.getIDToken() 換 session cookie。 */
+  liffLogin: (idToken: string) => call<{ ok: true; uid: string }>('POST', '/auth/liff', { idToken }),
+  rotateCheckinToken: (id: string) =>
+    call<{ ok: true; checkinToken: string; checkinUrl: string }>('POST', `/trips/${id}/checkin-token/rotate`),
+  /** 免登入打卡頁（/c/{token}）。 */
+  checkinPage: {
+    get: (token: string) => call<CheckinPageJson>('GET', `/c/${encodeURIComponent(token)}`),
+    checkin: (token: string, body: CheckinBody) => call<CheckinResult>('POST', `/c/${encodeURIComponent(token)}/checkin`, body),
+    photo: (token: string, form: FormData) => callForm<CheckinResult & { photoId: string }>(`/c/${encodeURIComponent(token)}/checkin/photo`, form),
+  },
   logout: () => call<{ ok: true }>('POST', '/auth/logout'),
   keys: () => call<KeyJson[]>('GET', '/keys'),
   createKey: (label: string) => call<{ id: string; key: string; label: string }>('POST', '/keys', { label }),

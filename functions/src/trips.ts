@@ -132,6 +132,7 @@ export async function createTrip(ownerUid: string, input: CreateTripInput): Prom
     reminderSentFor: null,
     flights: [],
     groupReadToken,
+    checkinToken: newToken(),
     readTokens: [groupReadToken],
     createdAt: Timestamp.fromDate(now),
     updatedAt: Timestamp.fromDate(now),
@@ -224,6 +225,28 @@ export async function recordCheckin(snap: TripSnap, input: CheckinInput): Promis
     );
   }
   return { nextDeadlineAt, tz, pushed, recovered };
+}
+
+/** 免登入打卡頁 token：舊行程沒有就補上。 */
+export async function ensureCheckinToken(snap: TripSnap): Promise<string> {
+  const cur = snap.data().checkinToken;
+  if (cur) return cur;
+  const token = newToken();
+  await snap.ref.update({ checkinToken: token, updatedAt: Timestamp.now() });
+  return token;
+}
+
+/** 輪替免登入打卡頁 token（舊連結立即失效）。 */
+export async function rotateCheckinToken(snap: TripSnap): Promise<string> {
+  const token = newToken();
+  await snap.ref.update({ checkinToken: token, updatedAt: Timestamp.now() });
+  return token;
+}
+
+/** 以打卡頁 token 找行程（不限狀態，呼叫端決定已結案怎麼回）。 */
+export async function getTripByCheckinToken(token: string): Promise<TripSnap | null> {
+  const q = await tripsCol.where('checkinToken', '==', token).limit(1).get();
+  return q.empty ? null : (q.docs[0] as TripSnap);
 }
 
 /**

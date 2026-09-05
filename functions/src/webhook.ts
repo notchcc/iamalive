@@ -9,7 +9,7 @@
 import type { webhook } from '@line/bot-sdk';
 import { logger } from 'firebase-functions/v2';
 import type { Request, Response } from 'express';
-import { familyUrl } from './config.js';
+import { familyUrl, liffUrl } from './config.js';
 import exifr from 'exifr';
 import { Timestamp, bindCodesCol, db, groupsCol, pendingPhotosCol } from './db.js';
 import { downloadMessageContent, recentListMessages, reply, textMsg, verifyLineSignature, whereMessages } from './line.js';
@@ -78,6 +78,11 @@ const HELP_DM =
   '・備註 已到飯店 → 補到最後一筆打卡\n' +
   '・在哪 / 行程 → 查看最後位置與最近回報\n' +
   '行程的建立與家人群組綁定請到管理頁。';
+
+function helpDm(): string {
+  const u = liffUrl();
+  return u ? `${HELP_DM}\n管理頁：${u}` : HELP_DM;
+}
 
 /** 取出並消耗這位使用者待配對的照片（若未過期且屬於同一行程）。 */
 async function takePendingPhoto(uid: string, tripId: string): Promise<{ photoId: string; takenAt: Date | null } | null> {
@@ -268,7 +273,7 @@ async function handleQuery(ownerUid: string, text: string, replyToken: string): 
 async function handleDirectEvent(ev: Event, userId: string): Promise<void> {
   if (ev.type === 'follow') {
     const rt = (ev as webhook.FollowEvent).replyToken;
-    if (rt) await reply(rt, [textMsg(`感謝加入 iamalive。\n${HELP_DM}`)]);
+    if (rt) await reply(rt, [textMsg(`感謝加入 iamalive。\n${helpDm()}`)]);
     return;
   }
   if (ev.type !== 'message') return;
@@ -285,7 +290,7 @@ async function handleDirectEvent(ev: Event, userId: string): Promise<void> {
   const text = (mev.message as webhook.TextMessageContent).text.trim();
   if (await handleOwnerCommand(userId, text, mev.replyToken)) return;
   if (await handleQuery(userId, text, mev.replyToken)) return;
-  await reply(mev.replyToken, [textMsg(HELP_DM)]);
+  await reply(mev.replyToken, [textMsg(helpDm())]);
 }
 
 async function handleEvent(ev: Event): Promise<void> {

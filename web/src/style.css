@@ -144,3 +144,10 @@ details.manual summary { cursor: pointer; font-size: 14px; }
 .tabs button { flex: 1; background: none; border: none; border-bottom: 3px solid transparent; border-radius: 0; color: var(--muted); padding: 10px 4px; font-weight: 600; }
 .tabs button[aria-selected="true"] { color: var(--brand); border-bottom-color: var(--brand); }
 .pane > .card:last-child { margin-bottom: 24px; }
+
+/* 免登入打卡頁 */
+.checkin-page .status.idle { background: var(--idle-soft); }
+.big-actions { display: grid; gap: 10px; margin-top: 8px; }
+.big-actions button { padding: 16px; font-size: 18px; font-weight: 700; border-radius: 14px; }
+.btn-link { display: inline-block; padding: 10px 14px; border-radius: 10px; border: 1px solid var(--brand); color: var(--brand); text-decoration: none; background: #fff; }
+.login .or { margin: 10px 0 4px; }
