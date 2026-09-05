@@ -1,5 +1,5 @@
 /**
- * 行程領域邏輯：建立、打卡、預告離線、結案、家人連結、views 投影。
+ * 行程領域邏輯：建立、打卡、預告離線、結案、打卡頁 token、views 投影。
  * 所有寫入皆由此模組經 Admin SDK 進行。
  */
 import { randomBytes } from 'node:crypto';

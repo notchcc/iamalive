@@ -17,7 +17,7 @@
 | v0.5 | 新增**航段**（多筆，當地時間輸入），飛行中不警報、期限順延至降落後 3 小時；打卡紀錄加入**反向地理編碼城市**與經緯度；行程開始前不警報；webhook 未綁定時自動綁定首個群組 |
 | v0.6 | 新增**照片打卡**：捷徑 D（分享表單）與 `/me` 上傳，以照片 EXIF 的 GPS 與拍攝時間為打卡資訊；照片存私有 GCS bucket，家人頁經 token 驗證取圖並顯示縮圖 |
 | v0.7 | **多使用者**：`/me` 改用 **LINE Login**（session cookie），捷徑改用可撤銷的 **API 金鑰**；行程、群組綁定、金鑰皆以 LINE userId 為範圍；群組以**綁定碼**綁定；不做邀請名單（任何 LINE 帳號可登入） |
-| v0.9 | `/me` 改以 **LIFF** 登入；管理頁**移除打卡功能**與專屬家人連結（只保留群組那條）（LINE 內自動登入，`POST /api/auth/liff`），瀏覽器授權碼流程保留；每趟行程一個**免登入打卡頁** `/c/{token}`（PWA 主畫面捷徑，可輪替） |
+| v0.9 | `/me` 改以 **LIFF** 登入（LINE 內自動登入，`POST /api/auth/liff`），瀏覽器授權碼流程保留；每趟行程一個**免登入打卡頁** `/c/{token}`（PWA 主畫面捷徑，可輪替）；管理頁**移除打卡功能**與專屬家人連結（只保留群組那條） |
 | v0.8 | 航班查詢（AeroDataBox）預填航段；行程中可**更改打卡頻率**（期限立即重算）；`/me` 分成**打卡 / 行程管理 / 家人頁 / 參數設定**四個頁籤；期限前 1 小時官方帳號**私訊旅人提醒** |
 
 ---
@@ -655,7 +655,7 @@ firebase functions:secrets:set TRAVELER_LINE_UID
 | 步驟 | 內容 | 工時 |
 |---|---|---|
 | 1 | Firebase 專案、Blaze、Secrets、規則與索引；LINE OA 與 channel 設定（§9.3） | 0.5 天 |
-| 2 | `api` Function：trips / checkin（含 tz 推算）/ offline / watchers / status；views 投影 | 1 天 |
+| 2 | `api` Function：trips / checkin（含 tz 推算）/ offline / status；views 投影 | 1 天 |
 | 3 | `lineWebhook`：驗簽、join/leave、位置訊息打卡、文字指令、「在哪」「行程」reply；`pushGroup` 與訊息模板（雙時區格式） | 1 天 |
 | 4 | 家人頁：雙時鐘、onSnapshot、地圖、時間軸（同元件供 `/me` 使用） | 0.75 天 |
 | 5 | `/me` 管理頁 + 捷徑 A/B/C 製作與說明文件 | 0.5 天 |
