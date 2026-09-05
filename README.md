@@ -1,6 +1,6 @@
 # iamalive
 
-個人用旅行報平安：一鍵打卡、家人群組 LINE 通知、逾時警報、雙時區家人頁。規格見 [`docs/spec.md`](docs/spec.md)（v0.4）。
+個人用旅行報平安：一鍵打卡、家人群組 LINE 通知、逾時警報、雙時區家人頁。規格見 [`docs/spec.md`](docs/spec.md)（v0.9）。
 
 ```
 functions/   Cloud Functions（api、lineWebhook、checkOverdue）
@@ -27,6 +27,7 @@ docs/        規格書
 1. LINE Developers → 同一個 Provider → 新增 **LINE Login** channel，App types 勾 Web app。
 2. Callback URL 填 `https://<host>/api/auth/line/callback`。
 3. 記下 **Channel ID**（填 `functions/.env` 的 `LINE_LOGIN_CHANNEL_ID`）與 **Channel secret**（Secret `LINE_LOGIN_CHANNEL_SECRET`）。
+4. 同一個 channel → **LIFF** 分頁 → 新增：Endpoint URL `https://<host>/me`、Size Full、Scopes `openid` + `profile`、Bot link feature On (normal)。LIFF ID 填 `web/.env` 的 `VITE_LIFF_ID` 與 `functions/.env` 的 `LIFF_ID`。管理頁從 LINE 內開 `https://liff.line.me/<LIFF ID>` 會自動登入（可放進官方帳號的圖文選單）。
 
 #### 2b. Messaging API channel（官方帳號）
 
@@ -69,7 +70,7 @@ firebase deploy --only firestore,functions,hosting
 
 ### 5. 登入、綁定群組、產生金鑰
 
-1. 開 `https://<host>/me` → 「用 LINE 登入」（iPhone 會跳 LINE App 授權）。
+1. 在 LINE 內開 `https://liff.line.me/<LIFF ID>`（自動登入），或用瀏覽器開 `https://<host>/me` → 「用 LINE 登入」。
 2. 把官方帳號邀請進家人群組，回到 `/me` 按「產生綁定碼」，由你本人在群組輸入「綁定 123456」。bot 回「✅ 綁定完成」。
 3. `/me` → 捷徑金鑰 → 產生一把，複製到捷徑的 `X-Api-Key`（只顯示一次；可隨時撤銷重發）。
 
@@ -77,12 +78,14 @@ firebase deploy --only firestore,functions,hosting
 
 ### 6. 捷徑
 
-依 [`shortcuts/README.md`](shortcuts/README.md) 建立捷徑 A（必要）、B、C。
+兩種擇一或並用：
+- **主畫面捷徑（最簡單）**：`/me` → 行程管理 → 打卡頁，用 Safari 開啟連結 → 分享 → 加入主畫面。點圖示就能定位或拍照打卡，不需登入；連結外洩就在同一張卡片按「輪替」。
+- **iOS 捷徑 App**：依 [`shortcuts/README.md`](shortcuts/README.md) 建立捷徑 A（必要）、B、C、D，可搭配自動化。
 
 ## 日常使用
 
 1. `/me` 用 LINE 登入後建立行程（群組收到「行程開始」與家人頁連結）。
-2. 出門後按捷徑 A 打卡；或**直接在 LINE 私訊官方帳號傳送「位置」**，也算一次打卡；先傳照片再傳位置（15 分鐘內）會記成含照片的打卡。打卡不推群組；家人看家人頁，或在群組輸入「在哪」「行程」。
+2. 出門後點主畫面的打卡頁圖示或按捷徑 A 打卡；或**直接在 LINE 私訊官方帳號傳送「位置」**，也算一次打卡；先傳照片再傳位置（15 分鐘內）會記成含照片的打卡。打卡不推群組；家人看家人頁，或在群組輸入「在哪」「行程」。
 3. 長途飛行前按捷徑 C 或在群組輸入 `離線 16`。行程中要改打卡頻率：`/me` 行程管理，或輸入 `頻率 6`（期限立即重算）。
 4. 回報期限前 1 小時，官方帳號會私訊提醒你本人（要先加 @574stmif 為好友；每個期限一次）。
 5. 逾時未打卡：群組收到警報，每 3 小時重複、最多 4 次；台北 23:00–07:00 發出的警報會在 08:00 補發一次。
