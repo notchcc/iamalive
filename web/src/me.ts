@@ -355,7 +355,12 @@ export function renderMePage(root: HTMLElement): () => void {
 
       <section class="card">
         <h2>用照片打卡 <span class="muted">讀取照片的 GPS 與拍攝時間</span></h2>
-        <input id="photo-file" type="file" accept="image/*" />
+        <input id="photo-camera" type="file" accept="image/*" capture="environment" hidden />
+        <input id="photo-file" type="file" accept="image/*" hidden />
+        <div class="row">
+          <button id="photo-take" type="button">📷 拍照打卡</button>
+          <button id="photo-choose" type="button" class="secondary">🖼️ 選擇照片</button>
+        </div>
         <div id="photo-preview" class="photo-preview" hidden>
           <img id="photo-img" alt="" />
           <div class="info">
@@ -366,7 +371,7 @@ export function renderMePage(root: HTMLElement): () => void {
             </div>
           </div>
         </div>
-        <p class="muted small">上傳前會縮到 1600px。備註與「下次回報」欄位共用上方輸入。</p>
+        <p class="muted small">拍照的照片沒有 GPS，會自動改用目前定位；從圖庫選的照片會讀 EXIF 座標。上傳前會縮到 1600px。備註與「下次回報」欄位共用上方輸入。</p>
       </section>
 
       <section class="card"><h2>家人頁預覽</h2><div id="family-embed"></div></section>`;
@@ -619,6 +624,7 @@ export function renderMePage(root: HTMLElement): () => void {
 
     // ---- 照片打卡 ----
     const photoFile = root.querySelector<HTMLInputElement>('#photo-file')!;
+    const photoCamera = root.querySelector<HTMLInputElement>('#photo-camera')!;
     const photoPreview = root.querySelector<HTMLElement>('#photo-preview')!;
     const photoImg = root.querySelector<HTMLImageElement>('#photo-img')!;
     const photoMetaEl = root.querySelector<HTMLElement>('#photo-meta')!;
@@ -636,19 +642,9 @@ export function renderMePage(root: HTMLElement): () => void {
       photoGpsBtn.hidden = false;
     };
 
-    photoFile.addEventListener('change', async () => {
-      const file = photoFile.files?.[0];
-      if (!file) return;
-      photoPreview.hidden = false;
-      photoImg.src = URL.createObjectURL(file);
-      photoMetaEl.textContent = '讀取照片資訊…';
-      const meta = await extractPhotoMeta(file);
-      photoState = { file, ...meta };
-      renderPhotoMeta();
-    });
-
-    photoGpsBtn.addEventListener('click', () => {
+    const fillFromGps = (): void => {
       photoGpsBtn.disabled = true;
+      photoMetaEl.innerHTML = `${photoMetaEl.innerHTML}<div class="muted">定位中…</div>`;
       navigator.geolocation.getCurrentPosition(
         (pos) => {
           if (photoState) {
@@ -661,11 +657,32 @@ export function renderMePage(root: HTMLElement): () => void {
         },
         (err) => {
           photoGpsBtn.disabled = false;
+          renderPhotoMeta();
           toast(`定位失敗（${err.message}）`, 'err');
         },
         { enableHighAccuracy: true, timeout: 10_000, maximumAge: 60_000 },
       );
-    });
+    };
+
+    const onPhotoPicked = async (input: HTMLInputElement, fromCamera: boolean): Promise<void> => {
+      const file = input.files?.[0];
+      if (!file) return;
+      photoPreview.hidden = false;
+      photoImg.src = URL.createObjectURL(file);
+      photoMetaEl.textContent = '讀取照片資訊…';
+      const meta = await extractPhotoMeta(file);
+      photoState = { file, ...meta };
+      if (fromCamera && photoState.takenAt == null) photoState.takenAt = new Date();
+      renderPhotoMeta();
+      // 瀏覽器相機拍的照片不會帶 GPS，直接改用目前定位
+      if (photoState.lat == null || photoState.lng == null) fillFromGps();
+      input.value = '';
+    };
+    root.querySelector('#photo-take')!.addEventListener('click', () => photoCamera.click());
+    root.querySelector('#photo-choose')!.addEventListener('click', () => photoFile.click());
+    photoCamera.addEventListener('change', () => void onPhotoPicked(photoCamera, true));
+    photoFile.addEventListener('change', () => void onPhotoPicked(photoFile, false));
+    photoGpsBtn.addEventListener('click', fillFromGps);
 
     photoSubmit.addEventListener('click', async () => {
       if (!photoState || photoState.lat == null || photoState.lng == null) return;

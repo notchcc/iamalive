@@ -369,7 +369,7 @@ reply 免費，不計額度。非旅行者傳的位置訊息忽略。
 - 「用瀏覽器定位打卡」：`getCurrentPosition({ enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 })`，`source = web-gps`，此路徑有精度值。
 - 「地圖選點打卡」：定位失敗時的手動路徑，`source = manual`。
 - 建立 / 結束行程、預告離線、新增 / 撤銷家人連結、顯示群組綁定狀態與本月額度。
-- **用照片打卡**卡片：`<input type=file accept=image/*>`（iPhone 顯示拍照 / 圖庫），瀏覽器端以 `exifr` 讀 GPS、拍攝時間、`GPSHPositioningError`，無 GPS 時可改用目前定位；`createImageBitmap` 縮圖至 1600px 後 multipart 上傳。iOS Safari 選圖是否保留 GPS EXIF 因版本而異，需實機確認。
+- **用照片打卡**卡片：兩個按鈕，「拍照打卡」對應 `<input type=file accept=image/* capture=environment>`（iOS 直接開相機；瀏覽器相機拍的照片沒有 GPS，自動改用目前定位，拍攝時間取現在），「選擇照片」對應不帶 `capture` 的 input（開圖庫）；瀏覽器端以 `exifr` 讀 GPS、拍攝時間、`GPSHPositioningError`，無 GPS 時可改用目前定位；`createImageBitmap` 縮圖至 1600px 後 multipart 上傳。iOS Safari 選圖是否保留 GPS EXIF 因版本而異，需實機確認。
 - **登入**：未登入只顯示「用 LINE 登入」；已登入右上顯示名稱與頭像，登出在「參數設定」。
 - **家人 LINE 群組**卡片：未綁定時顯示三步驟（邀請官方帳號、產生綁定碼、本人在群組輸入）；已綁定可解除。
 - **捷徑金鑰**卡片：列表（標籤、前 8 碼、建立與最後使用時間）、產生（只顯示一次、複製）、撤銷。
