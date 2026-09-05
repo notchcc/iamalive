@@ -354,6 +354,18 @@ async function main() {
   await webhookEvent({ type: 'message', replyToken: 'r', timestamp: Date.now(), source: { type: 'user', userId: A_UID }, message: { id: '4', type: 'text', text: '備註 私訊補的備註' } });
   view = (await db.doc(`views/${trip.groupReadToken}`).get()).data();
   assert.equal(view.recent[0].note, '私訊補的備註', 'owner command works in DM');
+  // 打卡清單 + LINE「刪除最後一筆」
+  r = await call('GET', `/trips/${trip.id}/checkins`);
+  assert.equal(r.status, 200);
+  const beforeCount = r.json.length;
+  assert.ok(beforeCount >= 2);
+  assert.equal(r.json[0].note, '私訊補的備註', 'newest first, note attached');
+  assert.ok(r.json[0].at && r.json[0].tz === 'Europe/Zurich');
+  await webhookEvent({ type: 'message', replyToken: 'r', timestamp: Date.now(), source: { type: 'user', userId: A_UID }, message: { id: '5', type: 'text', text: '刪除最後一筆' } });
+  r = await call('GET', `/trips/${trip.id}/checkins`);
+  assert.equal(r.json.length, beforeCount - 1, 'latest checkin deleted via LINE');
+  assert.notEqual(r.json[0]?.note, '私訊補的備註');
+  assert.equal((await call('GET', `/trips/${trip.id}/checkins`, undefined, sessB)).status, 404, "B cannot list A's checkins");
   log('direct-message checkin + commands ok');
 
   // 圖片訊息：無 GPS → 15 分鐘內剛打過卡 → 附到那筆

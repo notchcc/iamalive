@@ -1,4 +1,4 @@
-import type { CheckinPageJson, FlightInput, FlightJson, FlightLegJson, KeyJson, StatusJson, TripJson, UserJson } from './types';
+import type { CheckinJson, CheckinPageJson, FlightInput, FlightJson, FlightLegJson, KeyJson, StatusJson, TripJson, UserJson } from './types';
 
 export class ApiError extends Error {
   constructor(
@@ -80,6 +80,7 @@ export const api = {
   trips: () => call<TripJson[]>('GET', '/trips'),
   createTrip: (input: { title: string; startAt: string; endAt: string; intervalHours: number }) =>
     call<TripJson>('POST', '/trips', input),
+  checkins: (id: string, limit = 100) => call<CheckinJson[]>('GET', `/trips/${id}/checkins?limit=${limit}`),
   deleteCheckin: (id: string, checkinId: string) => call<{ ok: true }>('DELETE', `/trips/${id}/checkins/${checkinId}`),
   offline: (id: string, hours: number) =>
     call<{ ok: true; offlineUntil: string; nextDeadlineAt: string; pushed: boolean }>('POST', `/trips/${id}/offline`, { hours }),

@@ -15,7 +15,7 @@ import { Timestamp, bindCodesCol, db, groupsCol, pendingPhotosCol } from './db.j
 import { downloadMessageContent, recentListMessages, reply, textMsg, verifyLineSignature, whereMessages } from './line.js';
 import { MAX_PHOTO_BYTES, deletePhoto, isAllowedImage, savePhoto } from './photos.js';
 import { fmtBoth } from './time.js';
-import { attachPhotoToLastCheckin, endTrip, getActiveTrip, recentForTrip, recordCheckin, setIntervalHours, setOffline, updateLastNote } from './trips.js';
+import { attachPhotoToLastCheckin, deleteLatestCheckin, endTrip, getActiveTrip, recentForTrip, recordCheckin, setIntervalHours, setOffline, updateLastNote } from './trips.js';
 
 /** 照片與位置的配對窗。 */
 const PAIR_WINDOW_MS = 15 * 60_000;
@@ -76,6 +76,7 @@ const HELP_DM =
   '・頻率 6 → 之後改成每 6 小時回報，期限立即重算\n' +
   '・結束 → 結束目前行程\n' +
   '・備註 已到飯店 → 補到最後一筆打卡\n' +
+  '・刪除最後一筆 → 刪掉最新一筆打卡（含照片）\n' +
   '・在哪 / 行程 → 查看最後位置與最近回報\n' +
   '行程的建立與家人群組綁定請到管理頁。';
 
@@ -226,6 +227,21 @@ async function handleOwnerCommand(ownerUid: string, text: string, replyToken: st
     }
     const out = await setIntervalHours(trip, hours);
     await reply(replyToken, [textMsg(`已改為每 ${hours} 小時回報，下次期限 ${fmtBoth(out.nextDeadlineAt, trip.data().travelerTz)}。`)]);
+    return true;
+  }
+  if (/^刪除(最後|上)一筆$/.test(text)) {
+    const trip = await getActiveTrip(ownerUid);
+    if (!trip) {
+      await reply(replyToken, [textMsg('目前沒有進行中的行程。')]);
+      return true;
+    }
+    const gone = await deleteLatestCheckin(trip);
+    if (!gone) {
+      await reply(replyToken, [textMsg('沒有可刪除的打卡。')]);
+      return true;
+    }
+    const where = gone.place ? `${gone.place} · ` : '';
+    await reply(replyToken, [textMsg(`🗑 已刪除 ${where}${fmtBoth(gone.at.toDate(), gone.tz)} 的打卡${gone.photoId ? '（含照片）' : ''}${gone.note ? `「${gone.note}」` : ''}。下次期限不變。`)]);
     return true;
   }
   if (text === '結束') {

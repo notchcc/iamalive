@@ -259,6 +259,7 @@ service cloud.firestore {
 | POST | `/api/c/:token/checkin` | 打卡頁 JSON 打卡 | 同 `/api/checkin` 的 body 與回應 |
 | POST | `/api/c/:token/checkin/photo` | 打卡頁照片打卡 | 同 `/api/checkin/photo` |
 | POST | `/api/trips/:id/checkin-token/rotate` | 輪替打卡頁 token | 舊連結立即 404 |
+| GET | `/api/trips/:id/checkins?limit=100` | 打卡清單（新到舊） | `/me` 打卡管理 |
 | GET | `/api/p/:readToken/:photoId` | 家人頁取圖 | **不需寫入 token**；驗證 `views/{readToken}` 存在且照片屬於該行程後串流回傳，`Cache-Control: private, max-age=86400` |
 | GET | `/api/flights/lookup?flightNo=BR61&date=YYYY-MM-DD` | 航班查詢 | AeroDataBox（RapidAPI，Secret `RAPIDAPI_KEY`）；回傳各航段的 IATA、城市、**機場時區**、表定當地與 UTC 時間；以「班號_日期」快取 12 小時；未設金鑰回 503 |
 | PUT | `/api/trips/:id/flights` | 整批更新航段 | `{ flights: [{ flightNo, fromCity, fromTz, departLocal, toCity, toTz, arriveLocal }] }`，`*Local` 為 `YYYY-MM-DDTHH:mm` 當地時間；驗證時區有效、降落晚於起飛、單段 ≤ 30 小時 |
@@ -370,8 +371,9 @@ reply 免費，不計額度。非旅行者傳的位置訊息忽略。
 
 ### 6.3 `/me` 網頁（備援與管理）
 
-- 分兩個頁籤，選取的頁籤記在 URL hash（`#trip` / `#settings`），重新整理後保留：
+- 分三個頁籤，選取的頁籤記在 URL hash（`#trip` / `#checkins` / `#settings`），重新整理後保留：
   - **行程管理**：無行程時為建立行程表單；有行程時為摘要、打卡頻率、航段、預告離線、結束行程。
+  - **打卡管理**：目前行程的打卡清單（新到舊，最多 100 筆，含地點、座標、來源、備註、照片縮圖），每筆可刪除（含照片）；切到頁籤時才載入。
   - **參數設定**：有行程時先列打卡頁連結（可輪替）與家人頁連結（僅群組那一條，複製 / 開啟），再來是家人 LINE 群組綁定與本月額度、捷徑金鑰、帳號（登出）。
 - 「用瀏覽器定位打卡」：`getCurrentPosition({ enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 })`，`source = web-gps`，此路徑有精度值。
 - 「地圖選點打卡」：定位失敗時的手動路徑，`source = manual`。
@@ -383,7 +385,7 @@ reply 免費，不計額度。非旅行者傳的位置訊息忽略。
 - **家人 LINE 群組**卡片：未綁定時顯示三步驟（邀請官方帳號、產生綁定碼、本人在群組輸入）；已綁定可解除。
 - **捷徑金鑰**卡片：列表（標籤、前 8 碼、建立與最後使用時間）、產生（只顯示一次、複製）、撤銷。
 - **航段**卡片：先以「航班號碼 + 出發日期」查詢，列出各航段勾選加入（城市與時區自動帶入，多段航班一次加入）；手動輸入收合在下方備用；新增表單含航班號碼、起飛城市 / 時區 / 當地時間、降落城市 / 時區 / 當地時間；時區欄為 datalist（常用城市中文對照），選時區自動帶入城市名，新增後下一段的起飛欄自動帶入上一段目的地。
-- 不內嵌家人頁預覽；旅人要看地圖與時間軸就開家人頁連結。刪除打卡目前只剩 API（`DELETE /api/trips/:id/checkins/:cid`），無介面。
+- 不內嵌家人頁預覽；旅人要看地圖與時間軸就開家人頁連結。刪除打卡在「打卡管理」頁籤，或 LINE 私訊「刪除最後一筆」。
 - **打卡頁**卡片（參數設定頁籤）：顯示 `/c/{token}` 連結、複製、開啟、輪替，附「加入主畫面」說明。
 
 ### 6.4 打卡頁 `/c/{token}`（免登入，主畫面捷徑 / PWA）

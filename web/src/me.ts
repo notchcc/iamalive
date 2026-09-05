@@ -1,11 +1,11 @@
 /**
- * /me 管理頁，分兩個頁籤：行程管理（建立/結束、頻率、航段、預告離線）、參數設定（打卡頁與家人頁連結、群組綁定、捷徑金鑰、帳號）。
+ * /me 管理頁，分三個頁籤：行程管理（建立/結束、頻率、航段、預告離線）、打卡管理（清單 + 刪除）、參數設定（打卡頁與家人頁連結、群組綁定、捷徑金鑰、帳號）。
  * 打卡本身不在管理頁：用 /c/{token} 打卡頁、LINE 位置訊息或捷徑。
  */
 import { ApiError, api } from './api';
 import { getLiff } from './liff';
-import { CITY_NAMES, TAIPEI, fmtBoth, fmtDateTime, toLocalInput } from './time';
-import type { FlightInput, FlightJson, FlightLegJson, KeyJson, StatusJson, TripJson } from './types';
+import { CITY_NAMES, TAIPEI, fmtAgo, fmtBoth, fmtDateTime, toLocalInput } from './time';
+import type { CheckinJson, FlightInput, FlightJson, FlightLegJson, KeyJson, StatusJson, TripJson } from './types';
 
 function esc(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
@@ -134,9 +134,10 @@ export function renderMePage(root: HTMLElement): () => void {
     }
   };
 
-  type Tab = 'trip' | 'settings';
+  type Tab = 'trip' | 'checkins' | 'settings';
   const TABS: Array<[Tab, string]> = [
     ['trip', '行程管理'],
+    ['checkins', '打卡管理'],
     ['settings', '參數設定'],
   ];
   const tabFromHash = (): Tab | null => {
@@ -159,16 +160,27 @@ export function renderMePage(root: HTMLElement): () => void {
         </nav>
 
         <section class="pane" data-pane="trip" hidden>${t ? renderTripPane(t) : renderCreateSection()}</section>
+        <section class="pane" data-pane="checkins" hidden>
+          <section class="card">
+            <h2>打卡紀錄 <span class="muted">新到舊，最多 100 筆</span></h2>
+            <div id="checkin-list" class="timeline"><p class="muted">${t ? '切到此頁籤時載入' : '目前沒有進行中的行程'}</p></div>
+          </section>
+        </section>
         <section class="pane" data-pane="settings" hidden>${renderSettingsPane()}</section>
       </div>`;
 
     // ---- 頁籤 ----
+    let checkinsLoaded = false;
     const panes = [...root.querySelectorAll<HTMLElement>('.pane')];
     const tabBtns = [...root.querySelectorAll<HTMLButtonElement>('[data-tab]')];
     const showTab = (k: Tab): void => {
       panes.forEach((p) => (p.hidden = p.dataset.pane !== k));
       tabBtns.forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === k)));
       history.replaceState(null, '', `#${k}`);
+      if (k === 'checkins' && t && !checkinsLoaded) {
+        checkinsLoaded = true;
+        void loadCheckins(t);
+      }
     };
     tabBtns.forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab as Tab)));
     root.querySelectorAll<HTMLButtonElement>('[data-goto]').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.goto as Tab)));
@@ -178,6 +190,58 @@ export function renderMePage(root: HTMLElement): () => void {
     else bindCreateSection();
 
     showTab(tabFromHash() ?? 'trip');
+  };
+
+  // ---- 打卡管理頁籤：清單 + 刪除 ----
+  const SRC_LABEL: Record<string, string> = { shortcut: '捷徑', line: 'LINE', 'web-gps': '網頁定位', manual: '手動選點', photo: '照片' };
+  const loadCheckins = async (t: TripJson): Promise<void> => {
+    const el = root.querySelector<HTMLElement>('#checkin-list');
+    if (!el) return;
+    el.innerHTML = '<p class="muted">載入中…</p>';
+    let items: CheckinJson[];
+    try {
+      items = await api.checkins(t.id);
+    } catch (e) {
+      el.innerHTML = `<p class="bad-text">${esc(errText(e))}</p>`;
+      return;
+    }
+    if (!items.length) {
+      el.innerHTML = '<p class="muted">尚無打卡</p>';
+      return;
+    }
+    const now = new Date();
+    const photoUrl = (id: string) => `/api/p/${encodeURIComponent(t.groupReadToken)}/${encodeURIComponent(id)}`;
+    el.innerHTML = `<ul>${items
+      .map((it) => {
+        const at = new Date(it.at);
+        return `<li class="tl-item src-${esc(it.src)}${it.photoId ? ' has-photo' : ''}">
+          ${it.photoId ? `<a class="tl-photo" href="${photoUrl(it.photoId)}" target="_blank" rel="noopener"><img src="${photoUrl(it.photoId)}" alt="" loading="lazy" /></a>` : ''}
+          <div class="tl-time"><b>${esc(fmtBoth(at, it.tz))}</b><span class="ago">${esc(fmtAgo(at, now))}</span></div>
+          <div class="tl-place">${it.place ? `📍 ${esc(it.place)}` : ''}<span class="coord">${it.lat.toFixed(5)}, ${it.lng.toFixed(5)}${it.acc ? ` ±${Math.round(it.acc)} m` : ''}</span></div>
+          ${it.note ? `<div class="tl-body">${esc(it.note)}</div>` : ''}
+          <div class="tl-meta">${esc(SRC_LABEL[it.src] ?? it.src)}${it.takenAt ? ` · 拍攝 ${esc(fmtBoth(new Date(it.takenAt), it.tz))}` : ''}
+            <button type="button" class="link danger tl-del" data-del-checkin="${esc(it.id)}">刪除</button></div>
+        </li>`;
+      })
+      .join('')}</ul>`;
+    el.querySelectorAll<HTMLButtonElement>('[data-del-checkin]').forEach((b) =>
+      b.addEventListener('click', async () => {
+        const it = items.find((x) => x.id === b.dataset.delCheckin);
+        if (!it) return;
+        const what = `${it.note ? `「${it.note}」` : `${fmtBoth(new Date(it.at), it.tz)} 這筆打卡`}${it.photoId ? '（含照片）' : ''}`;
+        if (!confirm(`刪除 ${what}？此動作無法復原，下次期限不變。`)) return;
+        b.disabled = true;
+        try {
+          await api.deleteCheckin(t.id, it.id);
+          toast('已刪除');
+          status = await api.status();
+          await loadCheckins(t);
+        } catch (e) {
+          b.disabled = false;
+          toast(errText(e), 'err');
+        }
+      }),
+    );
   };
 
   // ---- 連結卡片（打卡頁、家人頁）：放在參數設定頁籤 ----

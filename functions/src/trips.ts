@@ -395,3 +395,11 @@ export async function updateLastNote(snap: TripSnap, note: string): Promise<bool
 export async function recentForTrip(tripId: string, limit = 5): Promise<RecentItem[]> {
   return loadRecent(tripId, limit);
 }
+
+/** 刪除最新一筆打卡（LINE 指令用）；回傳被刪的那筆，沒有可刪回 null。 */
+export async function deleteLatestCheckin(snap: TripSnap): Promise<RecentItem | null> {
+  const [latest] = await loadRecent(snap.id, 1);
+  if (!latest) return null;
+  await deleteCheckin(snap, latest.id);
+  return latest;
+}

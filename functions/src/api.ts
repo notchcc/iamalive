@@ -31,6 +31,7 @@ import {
   HttpError,
   createTrip,
   deleteCheckin,
+  recentForTrip,
   endTrip,
   resyncTrip,
   getActiveTrip,
@@ -583,6 +584,31 @@ export function createApp(): express.Express {
       const trip = await requireTrip(uidOf(res), req.params.id);
       const out = await endTrip(trip, '旅行者已手動結案');
       res.json({ ok: true, pushed: out.pushed });
+    }),
+  );
+
+  /** 打卡清單（新到舊），給 /me 打卡管理頁籤。 */
+  r.get(
+    '/trips/:id/checkins',
+    wrap(async (req, res) => {
+      const limit = z.coerce.number().int().min(1).max(200).default(100).parse(req.query.limit);
+      const trip = await requireTrip(uidOf(res), req.params.id, false);
+      const items = await recentForTrip(trip.id, limit);
+      res.json(
+        items.map((it) => ({
+          id: it.id,
+          lat: it.lat,
+          lng: it.lng,
+          acc: it.acc,
+          src: it.src,
+          tz: it.tz,
+          place: it.place ?? null,
+          note: it.note,
+          photoId: it.photoId ?? null,
+          takenAt: it.takenAt ? it.takenAt.toDate().toISOString() : null,
+          at: it.at.toDate().toISOString(),
+        })),
+      );
     }),
   );
 

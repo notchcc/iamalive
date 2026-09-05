@@ -87,6 +87,21 @@ export interface TripJson {
   flights: FlightJson[];
 }
 
+/** GET /api/trips/:id/checkins 的一筆。 */
+export interface CheckinJson {
+  id: string;
+  lat: number;
+  lng: number;
+  acc: number | null;
+  src: CheckinSource;
+  tz: string;
+  place: string | null;
+  note: string;
+  photoId: string | null;
+  takenAt: string | null;
+  at: string;
+}
+
 /** 免登入打卡頁 GET /api/c/{token} 回傳。 */
 export interface CheckinPageJson {
   title: string;
