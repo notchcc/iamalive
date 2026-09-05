@@ -2,6 +2,7 @@ import './style.css';
 import { renderFamilyPage } from './family';
 import { renderMePage } from './me';
 import { renderCheckinPage } from './checkin-page';
+import { renderGoPage, type GoTarget } from './go';
 
 const root = document.getElementById('app')!;
 const path = location.pathname.replace(/\/+$/, '') || '/';
@@ -11,6 +12,8 @@ if (family) {
   renderFamilyPage(root, family[1]);
 } else if (path === '/me') {
   renderMePage(root);
+} else if (path.match(/^\/me\/go\/(checkin|family|trip)$/)) {
+  renderGoPage(root, path.slice('/me/go/'.length) as GoTarget);
 } else if (path.match(/^\/c\/([A-Za-z0-9_-]{16,64})$/)) {
   renderCheckinPage(root, path.slice(3));
 } else {

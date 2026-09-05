@@ -27,7 +27,7 @@ docs/        規格書
 1. LINE Developers → 同一個 Provider → 新增 **LINE Login** channel，App types 勾 Web app。
 2. Callback URL 填 `https://<host>/api/auth/line/callback`。
 3. 記下 **Channel ID**（填 `functions/.env` 的 `LINE_LOGIN_CHANNEL_ID`）與 **Channel secret**（Secret `LINE_LOGIN_CHANNEL_SECRET`）。
-4. 同一個 channel → **LIFF** 分頁 → 新增：Endpoint URL `https://<host>/me`、Size Full、Scopes `openid` + `profile`、Bot link feature On (normal)。LIFF ID 填 `web/.env` 的 `VITE_LIFF_ID` 與 `functions/.env` 的 `LIFF_ID`。管理頁從 LINE 內開 `https://liff.line.me/<LIFF ID>` 會自動登入（可放進官方帳號的圖文選單）。
+4. 同一個 channel → **LIFF** 分頁 → 新增：Endpoint URL `https://<host>/me`、Size Full、Scopes `openid` + `profile`、Bot link feature On (normal)。LIFF ID 填 `web/.env` 的 `VITE_LIFF_ID` 與 `functions/.env` 的 `LIFF_ID`。管理頁從 LINE 內開 `https://liff.line.me/<LIFF ID>` 會自動登入。圖文選單三格建議連結：`https://liff.line.me/<LIFF ID>`（行程管理）、`…/go/checkin`（打卡頁）、`…/go/family`（家人頁），後兩者會依登入者轉到他目前行程的頁面。
 
 #### 2b. Messaging API channel（官方帳號）
 

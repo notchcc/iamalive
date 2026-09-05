@@ -120,6 +120,8 @@
 
 **LIFF（主要路徑）**：同一個 LINE Login channel 底下建一個 LIFF app（endpoint `https://<host>/me`，scope `openid profile`，bot prompt `normal`），ID 放 `web` 的 `VITE_LIFF_ID` 與 functions 的 `LIFF_ID`。`/me` 載入時 `liff.init`；從 LINE 內開啟（`https://liff.line.me/{LIFF_ID}`）會自動登入，外部瀏覽器則按鈕呼叫 `liff.login()`。取得 `liff.getIDToken()` 後 `POST /api/auth/liff {idToken}`（同站檢查）→ 同一個 LINE verify 端點驗 `aud` → 發同一種 session cookie。ID token 過期或無效時前端 `liff.logout()` 回到登入畫面。原本的授權碼流程保留為「改用瀏覽器授權頁登入」。
 
+**圖文選單固定入口** `/me/go/{checkin|family|trip}`：LIFF URL 會把路徑接在 endpoint 後（`https://liff.line.me/{LIFF_ID}/go/checkin`），頁面以 cookie 或 LIFF ID token 認出使用者，讀 `/api/status` 後 `location.replace` 到他目前行程的打卡頁或家人頁；沒有行程則導到 `/me#trip`。圖文選單三格：行程管理（LIFF 根）、打卡頁、家人頁。
+
 ---
 
 ## 4. 資料模型（Firestore）
