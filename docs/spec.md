@@ -262,6 +262,7 @@ service cloud.firestore {
 | POST | `/api/c/:token/checkin/photo` | 打卡頁照片打卡 | 同 `/api/checkin/photo` |
 | POST | `/api/trips/:id/checkin-token/rotate` | 輪替打卡頁 token | 舊連結立即 404 |
 | GET | `/api/trips/:id/checkins?limit=100` | 打卡清單（新到舊） | `/me` 打卡管理 |
+| GET | `/api/w/:readToken?limit=20&format=json\|text` | **AI / 程式讀取用**唯讀摘要 | 不需登入；行程狀態（含 state：ok / overdue / offline / in_flight / completed）、航段、最近打卡（台北與當地時間已格式化、地點、備註、照片網址）；`format=text` 回純文字給 LLM |
 | GET | `/api/w/:readToken/checkins?before=ISO&limit=10` | 家人頁時間軸分頁 | **不需登入**；驗證 view 存在，回傳 `before` 之前的打卡（新到舊，最多 50） |
 | GET | `/api/p/:readToken/:photoId` | 家人頁取圖 | **不需寫入 token**；驗證 `views/{readToken}` 存在且照片屬於該行程後串流回傳，`Cache-Control: private, max-age=86400` |
 | GET | `/api/flights/lookup?flightNo=BR61&date=YYYY-MM-DD` | 航班查詢 | AeroDataBox（RapidAPI，Secret `RAPIDAPI_KEY`）；回傳各航段的 IATA、城市、**機場時區**、表定當地與 UTC 時間；以「班號_日期」快取 12 小時；未設金鑰回 503 |

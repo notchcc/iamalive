@@ -45,7 +45,8 @@ import {
   rotateCheckinToken,
   getTripByCheckinToken,
 } from './trips.js';
-import { fmtDateTime, isValidTz, monthKey, zonedToUtc } from './time.js';
+import { TAIPEI, fmtBoth, fmtDateTime, fmtHours, isValidTz, monthKey, tzLabel, zonedToUtc } from './time.js';
+import { currentFlight } from './overdue-logic.js';
 import type { FlightSegment } from './types.js';
 import { parseMultipart } from './multipart.js';
 import { lookupFlight } from './flights-api.js';
@@ -255,6 +256,103 @@ export function createApp(): express.Express {
   );
 
   /** 家人頁取圖：以 readToken 驗證，不需寫入 token。 */
+  /**
+   * 給 AI / 程式讀的唯讀摘要：行程狀態 + 最近打卡（時間已格式化成台北與當地）。
+   * 只憑家人頁 token，不需登入。`?limit=`（預設 20，最多 100）、`?format=text` 回純文字。
+   */
+  r.get(
+    '/w/:token',
+    wrap(async (req, res) => {
+      const token = String(req.params.token);
+      if (!/^[A-Za-z0-9_-]{16,64}$/.test(token)) throw new HttpError(404, 'NOT_FOUND');
+      const view = await viewsCol.doc(token).get();
+      const tripId = view.data()?.tripId;
+      if (!tripId) throw new HttpError(404, 'NOT_FOUND');
+      const q = z.object({ limit: z.coerce.number().int().min(1).max(100).default(20), format: z.enum(['json', 'text']).default('json') }).parse(req.query);
+      const tripSnap = await tripsCol.doc(tripId).get();
+      const t = tripSnap.data();
+      if (!t) throw new HttpError(404, 'NOT_FOUND');
+      const now = new Date();
+      const items = await recentForTrip(tripId, q.limit);
+      const tz = t.travelerTz;
+      const flights = (t.flights ?? []).map((f) => ({ ...f, departAt: f.departAt.toDate(), arriveAt: f.arriveAt.toDate() }));
+      const inFlight = currentFlight(flights, now);
+      const deadline = t.nextDeadlineAt.toDate();
+      const offline = t.offlineUntil ? t.offlineUntil.toDate() : null;
+      const last = t.lastCheckinAt ? t.lastCheckinAt.toDate() : null;
+      const state = t.status !== 'active' ? 'completed' : inFlight ? 'in_flight' : offline && offline > now ? 'offline' : deadline < now ? 'overdue' : 'ok';
+      const stateZh: Record<string, string> = { completed: '行程已結束', in_flight: '飛行中', offline: '預告離線中', overdue: '已逾時未回報', ok: '正常' };
+      const checkins = items.map((it) => ({
+        id: it.id,
+        at: it.at.toDate().toISOString(),
+        atTaipei: fmtDateTime(it.at.toDate(), TAIPEI),
+        atLocal: fmtDateTime(it.at.toDate(), it.tz),
+        tz: it.tz,
+        tzLabel: tzLabel(it.tz),
+        lat: it.lat,
+        lng: it.lng,
+        accuracyM: it.acc,
+        place: it.place ?? null,
+        note: it.note,
+        source: it.src,
+        photoUrl: it.photoId ? `${familyUrl(token).replace(/\/w\/.*$/, '')}/api/p/${token}/${it.photoId}` : null,
+        takenAt: it.takenAt ? it.takenAt.toDate().toISOString() : null,
+      }));
+      const body = {
+        generatedAt: now.toISOString(),
+        generatedAtTaipei: fmtDateTime(now, TAIPEI),
+        trip: {
+          title: t.title,
+          status: t.status,
+          state,
+          stateZh: stateZh[state],
+          travelerTz: tz,
+          travelerTzLabel: tzLabel(tz),
+          nowLocal: fmtDateTime(now, tz),
+          intervalHours: t.intervalHours,
+          startAt: t.startAt.toDate().toISOString(),
+          endAt: t.endAt.toDate().toISOString(),
+          startAtTaipei: fmtDateTime(t.startAt.toDate(), TAIPEI),
+          endAtTaipei: fmtDateTime(t.endAt.toDate(), TAIPEI),
+          lastCheckinAt: last ? last.toISOString() : null,
+          lastCheckinBoth: last ? fmtBoth(last, tz) : null,
+          lastCheckinAgo: last ? fmtHours((now.getTime() - last.getTime()) / 3_600_000) : null,
+          lastCheckinPlace: t.lastCheckinPlace ?? null,
+          nextDeadlineAt: deadline.toISOString(),
+          nextDeadlineBoth: fmtBoth(deadline, tz),
+          offlineUntil: offline ? offline.toISOString() : null,
+          alerted: t.alerted,
+          alertCount: t.alertCount,
+          inFlight: inFlight ? { flightNo: inFlight.flightNo, fromCity: inFlight.fromCity, toCity: inFlight.toCity, arriveBoth: fmtBoth(inFlight.arriveAt, inFlight.toTz) } : null,
+          flights: (t.flights ?? []).map(flightJson),
+          familyUrl: familyUrl(token),
+        },
+        checkins,
+      };
+      res.setHeader('Cache-Control', 'no-store');
+      if (q.format === 'text') {
+        const lines = [
+          `# ${t.title}（${stateZh[state]}）`,
+          `產生時間：台北 ${body.generatedAtTaipei}；旅人所在時區 ${body.trip.travelerTzLabel}，當地 ${body.trip.nowLocal}`,
+          `行程：台北 ${body.trip.startAtTaipei} → ${body.trip.endAtTaipei}，每 ${t.intervalHours} 小時回報`,
+          `最後回報：${last ? `${t.lastCheckinPlace ? `${t.lastCheckinPlace} · ` : ''}${body.trip.lastCheckinBoth}（${body.trip.lastCheckinAgo}前）` : '尚無'}`,
+          `下次期限：${body.trip.nextDeadlineBoth}${state === 'overdue' ? `（已逾時，已發警報 ${t.alertCount} 則）` : ''}`,
+          ...(inFlight ? [`目前飛行中：${inFlight.flightNo} ${inFlight.fromCity} → ${inFlight.toCity}，預計 ${fmtBoth(inFlight.arriveAt, inFlight.toTz)} 降落`] : []),
+          ...(offline && offline > now ? [`預告離線至：${fmtBoth(offline, tz)}`] : []),
+          ...(body.trip.flights.length ? ['', '## 航段', ...body.trip.flights.map((f) => `- ${f.flightNo} ${f.fromCity} ${f.departLocal} → ${f.toCity} ${f.arriveLocal}（各地當地時間）`)] : []),
+          '',
+          `## 最近 ${checkins.length} 筆打卡（新到舊）`,
+          ...checkins.map((c) => `- ${c.atTaipei}（台北）${c.tz !== TAIPEI ? ` / ${c.atLocal}（${c.tzLabel}）` : ''}${c.place ? ` · ${c.place}` : ''} · ${c.lat.toFixed(4)}, ${c.lng.toFixed(4)}${c.note ? ` · 備註：${c.note}` : ''}${c.photoUrl ? ' · 含照片' : ''}`),
+          '',
+          `家人頁：${familyUrl(token)}`,
+        ];
+        res.type('text/plain; charset=utf-8').send(lines.join('\n'));
+        return;
+      }
+      res.json(body);
+    }),
+  );
+
   /** 家人頁時間軸分頁：以 readToken 驗證，回傳 `before` 之前的打卡（新到舊）。 */
   r.get(
     '/w/:token/checkins',

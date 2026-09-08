@@ -317,6 +317,21 @@ async function main() {
   assert.equal((await fetch(`${BASE}/w/notavalidtoken_notavalid/checkins`)).status, 404);
   log('family timeline paging ok');
 
+  // AI 讀取用摘要 JSON / 純文字
+  pub = await fetch(`${BASE}/w/${trip.groupReadToken}?limit=3`);
+  assert.equal(pub.status, 200);
+  const ai = await pub.json();
+  assert.equal(ai.trip.title, trip.title);
+  assert.equal(ai.checkins.length, 3);
+  assert.ok(ai.checkins[0].atTaipei && ai.checkins[0].atLocal && ai.trip.nextDeadlineBoth);
+  assert.equal(ai.trip.checkinToken, undefined, 'no secrets in AI summary');
+  pub = await fetch(`${BASE}/w/${trip.groupReadToken}?format=text`);
+  assert.equal(pub.status, 200);
+  assert.ok((pub.headers.get('content-type') || '').startsWith('text/plain'));
+  const txt = await pub.text();
+  assert.ok(txt.includes(trip.title) && txt.includes('最近'), txt.slice(0, 200));
+  log('AI summary endpoint ok');
+
   // ---- 使用者隔離 ----
   const sessB = await devLogin(B_UID, '旅人 B');
   r = await call('GET', '/trips/active', undefined, sessB);
