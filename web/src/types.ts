@@ -116,6 +116,17 @@ export interface CheckinJson {
   at: string;
 }
 
+/** GET /api/trips/:id/forecast、/api/c/:token/forecast。 */
+export interface ForecastJson {
+  now: string;
+  hours: number;
+  travelerTz: string;
+  deadlineShift: DeadlineShift;
+  segments: Array<{ kind: 'flight' | 'sleep' | 'offline' | 'quiet'; from: string; to: string; label: string }>;
+  events: Array<{ kind: 'deadline' | 'effectiveDeadline' | 'reminder' | 'alert' | 'tripEnd' | 'autoComplete'; at: string; label: string; delayed?: boolean; final?: boolean }>;
+  summary: string[];
+}
+
 /** 免登入打卡頁 GET /api/c/{token} 回傳。 */
 export interface CheckinPageJson {
   title: string;

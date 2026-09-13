@@ -48,6 +48,7 @@ import {
 } from './trips.js';
 import { TAIPEI, fmtBoth, fmtDateTime, fmtHours, isValidTz, monthKey, tzLabel, zonedToUtc } from './time.js';
 import { currentFlight, sleepOf, tripDeadline } from './overdue-logic.js';
+import { buildForecast } from './forecast.js';
 import type { FlightSegment } from './types.js';
 import { parseMultipart } from './multipart.js';
 import { lookupFlight } from './flights-api.js';
@@ -232,6 +233,29 @@ async function photoCheckin(req: Request, trip: ActiveTripSnap) {
 }
 
 const CHECKIN_TOKEN_RE = /^[A-Za-z0-9_-]{16,64}$/;
+
+/** Trip 文件 → 接下來 N 小時的警報預報。 */
+function forecastForTrip(t: import('./types.js').Trip, hours: number, now = new Date()) {
+  return buildForecast({
+    now,
+    hours,
+    status: t.status,
+    travelerTz: t.travelerTz,
+    startAt: t.startAt.toDate(),
+    endAt: t.endAt.toDate(),
+    nextDeadlineAt: t.nextDeadlineAt.toDate(),
+    offlineUntil: t.offlineUntil ? t.offlineUntil.toDate() : null,
+    flights: (t.flights ?? []).map((f) => ({ flightNo: f.flightNo, fromCity: f.fromCity, toCity: f.toCity, departAt: f.departAt.toDate(), arriveAt: f.arriveAt.toDate() })),
+    sleep: sleepOf(t),
+    alerted: t.alerted,
+    alertCount: t.alertCount,
+    lastAlertAt: t.lastAlertAt ? t.lastAlertAt.toDate() : null,
+    morningResendDue: t.morningResendDue,
+    morningResent: t.morningResent,
+    reminderSentFor: t.reminderSentFor ? t.reminderSentFor.toDate() : null,
+  });
+}
+const ForecastQuery = z.object({ hours: z.coerce.number().int().min(6).max(72).default(24) });
 
 /** 打卡頁 token → active 行程；找不到 404、已結案 410。 */
 async function requireTripByCheckinToken(token: string): Promise<ActiveTripSnap> {
@@ -474,6 +498,14 @@ export function createApp(): express.Express {
       res.json(checkinPageJson(snap.data()));
     }),
   );
+  r.get(
+    '/c/:token/forecast',
+    wrap(async (req, res) => {
+      res.setHeader('Cache-Control', 'no-store');
+      const snap = await requireTripByCheckinToken(req.params.token);
+      res.json(forecastForTrip(snap.data(), ForecastQuery.parse(req.query).hours));
+    }),
+  );
   r.post(
     '/c/:token/checkin',
     wrap(async (req, res) => {
@@ -652,6 +684,16 @@ export function createApp(): express.Express {
     wrap(async (req, res) => {
       const trip = await requireActiveTrip(uidOf(res));
       res.json(await photoCheckin(req, trip));
+    }),
+  );
+
+  /** 接下來 N 小時的警報預報（管理頁時間軸）。 */
+  r.get(
+    '/trips/:id/forecast',
+    wrap(async (req, res) => {
+      res.setHeader('Cache-Control', 'no-store');
+      const trip = await requireTrip(uidOf(res), req.params.id, false);
+      res.json(forecastForTrip(trip.data(), ForecastQuery.parse(req.query).hours));
     }),
   );
 

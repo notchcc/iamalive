@@ -5,6 +5,7 @@
 import { ApiError, api } from './api';
 import { getLiff } from './liff';
 import { CITY_NAMES, TAIPEI, fmtAgo, fmtBoth, fmtDateTime, toLocalInput } from './time';
+import { renderForecast } from './forecast';
 import type { CheckinJson, FlightInput, FlightJson, FlightLegJson, KeyJson, StatusJson, TripJson } from './types';
 
 function esc(s: string): string {
@@ -406,6 +407,11 @@ export function renderMePage(root: HTMLElement): () => void {
       ${renderTripSummary(t)}
 
       <section class="card">
+        <h2>接下來 24 小時 <span class="muted">假設不再打卡</span></h2>
+        <div id="forecast" class="forecast"><p class="muted">載入中…</p></div>
+      </section>
+
+      <section class="card">
         <h2>航段 <span class="muted">飛行中不警報，落地後 3 小時內回報</span></h2>
         <ul id="flight-list" class="flight-list"></ul>
         <form id="lookup-flight" class="lookup">
@@ -462,6 +468,13 @@ export function renderMePage(root: HTMLElement): () => void {
       </section>`;
 
   const bindTripSection = (t: TripJson): void => {
+    void api
+      .forecast(t.id)
+      .then((f) => renderForecast(root.querySelector<HTMLElement>('#forecast')!, f))
+      .catch((e) => {
+        const el = root.querySelector<HTMLElement>('#forecast');
+        if (el) el.innerHTML = `<p class="bad-text">${esc(errText(e))}</p>`;
+      });
     // ---- 航段 ----
     let flights: FlightJson[] = t.flights ?? [];
     const toInput = (f: FlightJson): FlightInput => ({

@@ -294,6 +294,15 @@ async function main() {
   assert.equal((await call('PATCH', `/trips/${trip.id}`, {})).status, 400);
   log('sleep window settings ok');
 
+  // 24 小時預報：登入版與打卡頁版
+  r = await call('GET', `/trips/${trip.id}/forecast`);
+  assert.equal(r.status, 200, JSON.stringify(r.json));
+  assert.equal(r.json.hours, 24);
+  assert.ok(Array.isArray(r.json.segments) && Array.isArray(r.json.events) && r.json.summary.length >= 1);
+  assert.ok(r.json.segments.some((s) => s.kind === 'quiet'), 'Taipei quiet segment present');
+  assert.equal((await call('GET', `/trips/${trip.id}/forecast?hours=3`)).status, 400, 'hours below minimum');
+  log('forecast endpoint ok');
+
   // ---- 免登入打卡頁 /c/{token}：不帶任何憑證 ----
   assert.ok(trip.checkinToken && trip.checkinUrl.endsWith(`/c/${trip.checkinToken}`), 'trip has checkin token');
   const JSON_H = { 'content-type': 'application/json' };
@@ -303,6 +312,9 @@ async function main() {
   assert.equal(pj.title, trip.title);
   assert.equal(pj.checkinToken, undefined, 'public json must not leak tokens');
   assert.equal(pj.familyUrl, undefined);
+  pub = await fetch(`${BASE}/c/${trip.checkinToken}/forecast`);
+  assert.equal(pub.status, 200);
+  assert.ok((await pub.json()).summary.length >= 1, 'public forecast');
   pub = await fetch(`${BASE}/c/${trip.checkinToken}/checkin`, { method: 'POST', headers: JSON_H, body: JSON.stringify({ lat: 35.68, lng: 139.76, source: 'web-gps', note: '免登入' }) });
   const pubText = await pub.text();
   assert.equal(pub.status, 200, pubText);

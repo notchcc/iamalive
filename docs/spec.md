@@ -17,7 +17,7 @@
 | v0.5 | 新增**航段**（多筆，當地時間輸入），飛行中不警報、期限順延至降落後 3 小時；打卡紀錄加入**反向地理編碼城市**與經緯度；行程開始前不警報；webhook 未綁定時自動綁定首個群組 |
 | v0.6 | 新增**照片打卡**：捷徑 D（分享表單）與 `/me` 上傳，以照片 EXIF 的 GPS 與拍攝時間為打卡資訊；照片存私有 GCS bucket，家人頁經 token 驗證取圖並顯示縮圖 |
 | v0.7 | **多使用者**：`/me` 改用 **LINE Login**（session cookie），捷徑改用可撤銷的 **API 金鑰**；行程、群組綁定、金鑰皆以 LINE userId 為範圍；群組以**綁定碼**綁定；不做邀請名單（任何 LINE 帳號可登入） |
-| v0.10 | **睡眠時段**：期限落在旅人當地睡眠時段內自動順延到結束後 1 小時，提醒與警報都依有效期限；家人頁 / 打卡頁 / LINE 顯示順延原因；view 帶 `effectiveDeadlineAt` 與 `deadlineShift` |
+| v0.10 | **睡眠時段**：期限落在旅人當地睡眠時段內自動順延到結束後 1 小時，提醒與警報都依有效期限；家人頁 / 打卡頁 / LINE 顯示順延原因；view 帶 `effectiveDeadlineAt` 與 `deadlineShift`；**24 小時警報預報**時間軸（管理頁、打卡頁） |
 | v0.9 | `/me` 改以 **LIFF** 登入（LINE 內自動登入，`POST /api/auth/liff`），瀏覽器授權碼流程保留；每趟行程一個**免登入打卡頁** `/c/{token}`（PWA 主畫面捷徑，可輪替）；管理頁**移除打卡功能**與專屬家人連結（只保留群組那條） |
 | v0.8 | 航班查詢（AeroDataBox）預填航段；行程中可**更改打卡頻率**（期限立即重算）；`/me` 分成**打卡 / 行程管理 / 家人頁 / 參數設定**四個頁籤；期限前 1 小時官方帳號**私訊旅人提醒** |
 
@@ -263,6 +263,8 @@ service cloud.firestore {
 | POST | `/api/c/:token/checkin/photo` | 打卡頁照片打卡 | 同 `/api/checkin/photo` |
 | POST | `/api/trips/:id/checkin-token/rotate` | 輪替打卡頁 token | 舊連結立即 404 |
 | PATCH | `/api/trips/:id` `{ sleep }` | 設定睡眠時段 `{ start: 'HH:mm', end: 'HH:mm' }`（當地時間，可跨午夜）或 `null` 關閉 | 不重算期限，只改有效期限規則；view 同步 |
+| GET | `/api/trips/:id/forecast?hours=24` | 接下來 N 小時（6–72）的警報預報 | 以 `overdue-logic` 每 15 分鐘模擬一次掃描（假設不再打卡）：區段（飛行窗、睡眠、離線、台北安靜時段）、事件（原始 / 有效期限、提醒、各則警報含是否深夜補發、行程結束、自動結案）、文字摘要 |
+| GET | `/api/c/:token/forecast?hours=24` | 同上，打卡頁用 | 憑打卡頁 token |
 | GET | `/api/trips/:id/checkins?limit=100` | 打卡清單（新到舊） | `/me` 打卡管理 |
 | GET | `/api/w/:readToken?limit=20&format=json\|text` | **AI / 程式讀取用**唯讀摘要 | 不需登入；行程狀態（含 state：ok / overdue / offline / in_flight / completed）、航段、最近打卡（台北與當地時間已格式化、地點、備註、照片網址）；`format=text` 回純文字給 LLM |
 | GET | `/api/w/:readToken/checkins?before=ISO&limit=10` | 家人頁時間軸分頁 | **不需登入**；驗證 view 存在，回傳 `before` 之前的打卡（新到舊，最多 50） |
@@ -385,6 +387,7 @@ reply 免費，不計額度。非旅行者傳的位置訊息忽略。
 - 「地圖選點打卡」：定位失敗時的手動路徑，`source = manual`。
 - 建立 / 結束行程、預告離線、顯示群組綁定狀態與本月額度。家人頁只有一條連結（建立行程時產生、群組訊息內附的那條），不另外製作專屬家人連結；資料模型仍保留 `readTokens[]`。
 - **管理頁不含打卡功能**：打卡走 `/c/{token}` 打卡頁、LINE 位置 / 照片訊息或 iOS 捷徑。
+- **接下來 24 小時**卡片（行程管理頁籤；打卡頁狀態卡下方也有）：橫向時間軸 SVG，上緣台北時刻、下緣旅人當地時刻（同時區則省略），區段以底色（飛行藍、睡眠靛、離線橘）與斜紋（台北 23–07）表示，事件為期限三角（空心原始、實心有效）、提醒鈴、警報圓點（深夜警報空心表示 08:00 補發），下方圖例與文字摘要。資料來自 `forecast` API，前端不重算規則。
 - **睡眠時段**卡片（行程管理頁籤）：啟用開關 + 開始 / 結束（旅人當地時間），預設 23:00–08:00。
 - **打卡頻率**卡片（行程管理頁籤）：行程中更改間隔並立即重算期限（`PATCH /api/trips/:id`）。
 - **用照片打卡**卡片：兩個按鈕，「拍照打卡」對應 `<input type=file accept=image/* capture=environment>`（iOS 直接開相機；瀏覽器相機拍的照片沒有 GPS，自動改用目前定位，拍攝時間取現在），「選擇照片」對應不帶 `capture` 的 input（開圖庫）；瀏覽器端以 `exifr` 讀 GPS、拍攝時間、`GPSHPositioningError`，無 GPS 時可改用目前定位；`createImageBitmap` 縮圖至 1600px 後 multipart 上傳。iOS Safari 選圖是否保留 GPS EXIF 因版本而異，需實機確認。

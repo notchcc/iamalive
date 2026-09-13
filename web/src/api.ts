@@ -1,4 +1,4 @@
-import type { CheckinJson, CheckinPageJson, FlightInput, SleepWindow, FlightJson, FlightLegJson, KeyJson, StatusJson, TripJson, UserJson } from './types';
+import type { CheckinJson, CheckinPageJson, FlightInput, ForecastJson, SleepWindow, FlightJson, FlightLegJson, KeyJson, StatusJson, TripJson, UserJson } from './types';
 
 export class ApiError extends Error {
   constructor(
@@ -68,6 +68,7 @@ export const api = {
   /** 免登入打卡頁（/c/{token}）。 */
   checkinPage: {
     get: (token: string) => call<CheckinPageJson>('GET', `/c/${encodeURIComponent(token)}`),
+    forecast: (token: string, hours = 24) => call<ForecastJson>('GET', `/c/${encodeURIComponent(token)}/forecast?hours=${hours}`),
     checkin: (token: string, body: CheckinBody) => call<CheckinResult>('POST', `/c/${encodeURIComponent(token)}/checkin`, body),
     photo: (token: string, form: FormData) => callForm<CheckinResult & { photoId: string }>(`/c/${encodeURIComponent(token)}/checkin/photo`, form),
   },
@@ -80,6 +81,7 @@ export const api = {
   trips: () => call<TripJson[]>('GET', '/trips'),
   createTrip: (input: { title: string; startAt: string; endAt: string; intervalHours: number }) =>
     call<TripJson>('POST', '/trips', input),
+  forecast: (id: string, hours = 24) => call<ForecastJson>('GET', `/trips/${id}/forecast?hours=${hours}`),
   checkins: (id: string, limit = 100) => call<CheckinJson[]>('GET', `/trips/${id}/checkins?limit=${limit}`),
   deleteCheckin: (id: string, checkinId: string) => call<{ ok: true }>('DELETE', `/trips/${id}/checkins/${checkinId}`),
   offline: (id: string, hours: number) =>

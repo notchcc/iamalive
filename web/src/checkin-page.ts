@@ -7,6 +7,7 @@ import { extractPhotoMeta, fmtBytes, shrinkImage } from './photo';
 import { fmtAgo, fmtBoth } from './time';
 import type { CheckinPageJson } from './types';
 import { renderShareBar } from './share';
+import { renderForecast } from './forecast';
 import { applyPwaIdentity } from './pwa';
 
 function esc(s: string): string {
@@ -40,6 +41,7 @@ export function renderCheckinPage(root: HTMLElement, token: string): () => void 
   root.innerHTML = `
     <div class="page checkin-page">
       <section class="status" id="cp-status"><p class="muted">載入中…</p></section>
+      <section class="card fc-card"><h2>接下來 24 小時 <span class="muted">假設不再打卡</span></h2><div id="cp-forecast" class="forecast"></div></section>
       <section class="card">
         <label>備註<input id="cp-note" maxlength="200" placeholder="可空，例如：已到飯店" /></label>
         <label>下次回報（小時，可空）<input id="cp-next" type="number" min="1" max="168" step="1" inputmode="numeric" /></label>
@@ -112,6 +114,10 @@ export function renderCheckinPage(root: HTMLElement, token: string): () => void 
       applyPwaIdentity('checkin', info.title);
       renderStatus();
       setBusy(info.status !== 'active');
+      void api.checkinPage
+        .forecast(token)
+        .then((f) => renderForecast(root.querySelector<HTMLElement>('#cp-forecast')!, f))
+        .catch(() => undefined);
     } catch (e) {
       renderError(e);
     }
