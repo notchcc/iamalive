@@ -177,8 +177,6 @@ label.inline input { width: auto; margin: 0; }
 
 /* 24 小時警報預報 */
 .forecast svg { display: block; overflow: visible; }
-.fc-axis-label { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); padding: 0 2px; }
-.fc-axis-label span:last-child { align-self: flex-end; }
 .fc-legend { display: flex; flex-wrap: wrap; gap: 6px 12px; font-size: 12px; color: var(--muted); margin-top: 4px; }
 .fc-legend .lg { display: inline-flex; align-items: center; gap: 4px; }
 .fc-legend i { display: inline-block; width: 14px; height: 10px; border-radius: 2px; }

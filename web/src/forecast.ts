@@ -9,18 +9,19 @@ function esc(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
 }
 
-const SEG_COLOR: Record<string, string> = { flight: '#bfdbfe', sleep: '#c7d2fe', offline: '#fed7aa' };
+const SEG_COLOR: Record<string, string> = { flight: '#93c5fd', sleep: '#ddd6fe', offline: '#fdba74' };
 const SEG_LABEL: Record<string, string> = { flight: '飛行窗（不警報）', sleep: '睡眠時段（期限順延）', offline: '預告離線（不警報）', quiet: '台北 23–07（警報 08:00 補發）' };
 
 export function renderForecast(el: HTMLElement, f: ForecastJson): void {
-  const W = 720;
-  const PAD = 14;
-  const TRACK_Y = 34;
-  const TRACK_H = 26;
-  const H = 96;
+  const W = 380; // 以手機寬度 1:1 為基準
+  const PAD_L = 36; // 左側放「台北」「當地」軸名
+  const PAD_R = 10;
+  const TRACK_Y = 30;
+  const TRACK_H = 22;
+  const H = 74;
   const start = new Date(f.now).getTime();
   const span = f.hours * 3_600_000;
-  const x = (iso: string | Date): number => PAD + ((typeof iso === 'string' ? new Date(iso).getTime() : iso.getTime()) - start) / span * (W - 2 * PAD);
+  const x = (iso: string | Date): number => PAD_L + ((typeof iso === 'string' ? new Date(iso).getTime() : iso.getTime()) - start) / span * (W - PAD_L - PAD_R);
   const showLocal = !sameAsTaipei(new Date(f.now), f.travelerTz);
 
   // 刻度：每 6 小時，對齊整點
@@ -33,9 +34,10 @@ export function renderForecast(el: HTMLElement, f: ForecastJson): void {
     const hTpe = Number(fmtTime(d, TAIPEI).slice(0, 2));
     if (hTpe % 6 === 0) {
       const xx = x(d);
+      if (xx - PAD_L < 16) continue; // 太靠近「現在」線，略過刻度文字
       ticks.push(`<line x1="${xx.toFixed(1)}" x2="${xx.toFixed(1)}" y1="${TRACK_Y - 4}" y2="${TRACK_Y + TRACK_H + 4}" stroke="#e5e7eb" />
-        <text x="${xx.toFixed(1)}" y="${TRACK_Y - 9}" text-anchor="middle" font-size="11" fill="#6b7280">${fmtTime(d, TAIPEI)}</text>
-        ${showLocal ? `<text x="${xx.toFixed(1)}" y="${TRACK_Y + TRACK_H + 16}" text-anchor="middle" font-size="11" fill="#6b7280">${fmtTime(d, f.travelerTz)}</text>` : ''}`);
+        <text x="${xx.toFixed(1)}" y="${TRACK_Y - 7}" text-anchor="middle" font-size="10" fill="#6b7280">${fmtTime(d, TAIPEI)}</text>
+        ${showLocal ? `<text x="${xx.toFixed(1)}" y="${TRACK_Y + TRACK_H + 13}" text-anchor="middle" font-size="10" fill="#6b7280">${fmtTime(d, f.travelerTz)}</text>` : ''}`);
     }
   }
 
@@ -59,9 +61,9 @@ export function renderForecast(el: HTMLElement, f: ForecastJson): void {
         case 'effectiveDeadline':
           return `<g>${title}<path d="M${xx - 6} ${TRACK_Y - 3} L${xx + 6} ${TRACK_Y - 3} L${xx} ${TRACK_Y + 8} Z" fill="#111827"/></g>`;
         case 'reminder':
-          return `<g>${title}<circle cx="${xx}" cy="${cy}" r="6" fill="#fff" stroke="#0f766e" stroke-width="2"/><text x="${xx}" y="${cy + 3.5}" text-anchor="middle" font-size="9" fill="#0f766e">🔔</text></g>`;
+          return `<g>${title}<circle cx="${xx}" cy="${cy}" r="5.5" fill="#fff" stroke="#0f766e" stroke-width="1.6"/><text x="${xx}" y="${cy + 3}" text-anchor="middle" font-size="8" fill="#0f766e">🔔</text></g>`;
         case 'alert':
-          return `<g>${title}<circle cx="${xx}" cy="${cy}" r="7" fill="${e.delayed ? '#fff' : '#b91c1c'}" stroke="#b91c1c" stroke-width="2"/><text x="${xx}" y="${cy + 3.5}" text-anchor="middle" font-size="9" font-weight="700" fill="${e.delayed ? '#b91c1c' : '#fff'}">!</text></g>`;
+          return `<g>${title}<circle cx="${xx}" cy="${cy}" r="6" fill="${e.delayed ? '#fff' : '#b91c1c'}" stroke="#b91c1c" stroke-width="1.6"/><text x="${xx}" y="${cy + 3}" text-anchor="middle" font-size="8" font-weight="700" fill="${e.delayed ? '#b91c1c' : '#fff'}">!</text></g>`;
         case 'tripEnd':
         case 'autoComplete':
           return `<g>${title}<line x1="${xx}" x2="${xx}" y1="${TRACK_Y - 6}" y2="${TRACK_Y + TRACK_H + 6}" stroke="#111827" stroke-dasharray="3 2"/></g>`;
@@ -77,14 +79,16 @@ export function renderForecast(el: HTMLElement, f: ForecastJson): void {
     .join('');
   const evLegend = `<span class="lg"><i class="tri"></i>期限</span><span class="lg"><i class="dot bell"></i>提醒</span><span class="lg"><i class="dot alert"></i>警報</span><span class="lg"><i class="dot alert hollow"></i>深夜警報（08:00 補發）</span>`;
 
+  const localName = tzLabel(f.travelerTz);
   el.innerHTML = `
-    <div class="fc-axis-label"><span>台北</span>${showLocal ? `<span>${esc(tzLabel(f.travelerTz))}</span>` : ''}</div>
     <svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="接下來 ${f.hours} 小時警報預報">
-      <defs><pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="2" height="6" fill="#9ca3af" opacity="0.45"/></pattern></defs>
-      <rect x="${PAD}" y="${TRACK_Y}" width="${W - 2 * PAD}" height="${TRACK_H}" fill="#f3f4f6" rx="4"/>
+      <defs><pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="2" height="6" fill="#6b7280" opacity="0.5"/></pattern></defs>
+      <text x="${PAD_L - 6}" y="${TRACK_Y - 7}" text-anchor="end" font-size="10" font-weight="700" fill="#374151">台北</text>
+      ${showLocal ? `<text x="${PAD_L - 6}" y="${TRACK_Y + TRACK_H + 13}" text-anchor="end" font-size="10" font-weight="700" fill="#374151">${esc(localName.length > 3 ? localName.slice(0, 3) : localName)}</text>` : ''}
+      <rect x="${PAD_L}" y="${TRACK_Y}" width="${W - PAD_L - PAD_R}" height="${TRACK_H}" fill="#f3f4f6" rx="4"/>
       ${segs}${quiet}${ticks.join('')}
-      <line x1="${PAD}" x2="${PAD}" y1="${TRACK_Y - 8}" y2="${TRACK_Y + TRACK_H + 8}" stroke="#0f766e" stroke-width="2"/>
-      <text x="${PAD + 3}" y="${TRACK_Y + TRACK_H + 30}" font-size="10" fill="#0f766e">現在</text>
+      <line x1="${PAD_L}" x2="${PAD_L}" y1="${TRACK_Y - 8}" y2="${TRACK_Y + TRACK_H + 8}" stroke="#0f766e" stroke-width="2"/>
+      <text x="${PAD_L}" y="10" text-anchor="middle" font-size="9" font-weight="700" fill="#0f766e">現在</text>
       ${marks}
     </svg>
     <div class="fc-legend">${legend}${evLegend}</div>
