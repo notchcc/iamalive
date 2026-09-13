@@ -41,7 +41,6 @@ export function renderCheckinPage(root: HTMLElement, token: string): () => void 
   root.innerHTML = `
     <div class="page checkin-page">
       <section class="status" id="cp-status"><p class="muted">載入中…</p></section>
-      <section class="card fc-card"><h2>接下來 24 小時 <span class="muted">假設不再打卡</span></h2><div id="cp-forecast" class="forecast"></div></section>
       <section class="card">
         <label>備註<input id="cp-note" maxlength="200" placeholder="可空，例如：已到飯店" /></label>
         <label>下次回報（小時，可空）<input id="cp-next" type="number" min="1" max="168" step="1" inputmode="numeric" /></label>
@@ -64,6 +63,7 @@ export function renderCheckinPage(root: HTMLElement, token: string): () => void 
         </div>
       </section>
       <div id="share"></div>
+      <section class="card fc-card"><h2>接下來 24 小時 <span class="muted">假設不再打卡</span></h2><div id="cp-forecast" class="forecast"></div></section>
       <footer class="foot"><small>此頁不需登入，持有連結者即可替這趟行程打卡，請勿轉傳。<br><button id="cp-refresh" class="link" type="button">重新整理</button></small></footer>
     </div>`;
 
