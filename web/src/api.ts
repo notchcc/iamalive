@@ -1,4 +1,4 @@
-import type { CheckinJson, CheckinPageJson, FlightInput, FlightJson, FlightLegJson, KeyJson, StatusJson, TripJson, UserJson } from './types';
+import type { CheckinJson, CheckinPageJson, FlightInput, SleepWindow, FlightJson, FlightLegJson, KeyJson, StatusJson, TripJson, UserJson } from './types';
 
 export class ApiError extends Error {
   constructor(
@@ -87,8 +87,9 @@ export const api = {
   lookupFlight: (flightNo: string, date: string) =>
     call<{ legs: FlightLegJson[] }>('GET', `/flights/lookup?flightNo=${encodeURIComponent(flightNo)}&date=${encodeURIComponent(date)}`),
   setFlights: (id: string, flights: FlightInput[]) => call<{ ok: true; flights: FlightJson[] }>('PUT', `/trips/${id}/flights`, { flights }),
-  setInterval: (id: string, hours: number) =>
-    call<{ ok: true; intervalHours: number; nextDeadlineAt: string }>('PATCH', `/trips/${id}`, { intervalHours: hours }),
+  patchTrip: (id: string, body: { intervalHours?: number; sleep?: SleepWindow | null }) =>
+    call<{ ok: true; intervalHours: number; nextDeadlineAt: string; sleep: SleepWindow | null; effectiveDeadlineAt: string }>('PATCH', `/trips/${id}`, body),
+  setInterval: (id: string, hours: number) => api.patchTrip(id, { intervalHours: hours }),
   end: (id: string) => call<{ ok: true; pushed: boolean }>('POST', `/trips/${id}/end`),
   unbindLine: () => call<{ ok: true }>('POST', '/line/unbind'),
 };

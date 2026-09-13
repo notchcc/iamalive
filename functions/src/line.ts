@@ -7,7 +7,7 @@ import { LINE_CHANNEL_ACCESS_TOKEN, LINE_CHANNEL_SECRET } from './config.js';
 import { Timestamp, db, groupIdForOwner, lineConfigRef } from './db.js';
 import { TAIPEI, fmtBoth, fmtDateTime, fmtHours, fmtTime, monthKey, tzLabel } from './time.js';
 import type { FlightSegment, PushKind, RecentItem, Trip } from './types.js';
-import { currentFlight } from './overdue-logic.js';
+import { currentFlight, tripDeadline } from './overdue-logic.js';
 
 export type Message = messagingApi.Message;
 
@@ -259,6 +259,13 @@ export function reminderMessages(trip: Trip, deadline: Date, now = new Date()): 
   ];
 }
 
+/** 「下次期限 …」，含航段 / 睡眠順延說明。 */
+export function deadlineLine(trip: Trip): string {
+  const eff = tripDeadline(trip);
+  const note = eff.kind === 'sleep' ? '（睡眠時段順延）' : eff.kind === 'flight' ? '（航段順延）' : '';
+  return `下次期限 ${fmtBoth(eff.at, trip.travelerTz)}${note}`;
+}
+
 /** 「在哪」回覆。 */
 export function whereMessages(trip: Trip, url: string, now = new Date()): Message[] {
   const msgs: Message[] = [];
@@ -267,7 +274,7 @@ export function whereMessages(trip: Trip, url: string, now = new Date()): Messag
       ? `預告離線至 ${fmtBoth(trip.offlineUntil.toDate(), trip.travelerTz)}`
       : trip.alerted
         ? '⚠️ 目前逾時未回報'
-        : `下次期限 ${fmtBoth(trip.nextDeadlineAt.toDate(), trip.travelerTz)}`;
+        : deadlineLine(trip);
   if (trip.lastCheckinGeo && trip.lastCheckinAt) {
     msgs.push(
       locationMsg(

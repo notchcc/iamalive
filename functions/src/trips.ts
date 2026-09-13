@@ -13,6 +13,8 @@ import { HOUR_MS, TAIPEI, isValidTz } from './time.js';
 import type { Checkin, CheckinSource, FlightSegment, RecentItem, Trip, View } from './types.js';
 
 import { HttpError } from './errors.js';
+import { DEFAULT_SLEEP, sleepOf, tripDeadline } from './overdue-logic.js';
+import type { SleepWindow } from './types.js';
 export { HttpError };
 
 export const RECENT_LIMIT = 100;
@@ -63,6 +65,7 @@ async function loadRecent(tripId: string, limit = RECENT_LIMIT): Promise<RecentI
 }
 
 export function buildView(tripId: string, trip: Trip, label: string, recent: RecentItem[]): View {
+  const eff = tripDeadline(trip);
   return {
     tripId,
     label,
@@ -75,6 +78,9 @@ export function buildView(tripId: string, trip: Trip, label: string, recent: Rec
     offlineUntil: trip.offlineUntil,
     alerted: trip.alerted,
     flights: trip.flights ?? [],
+    effectiveDeadlineAt: Timestamp.fromDate(eff.at),
+    deadlineShift: eff.kind,
+    sleep: sleepOf(trip),
     recent,
     updatedAt: Timestamp.now(),
   };
@@ -131,6 +137,7 @@ export async function createTrip(ownerUid: string, input: CreateTripInput): Prom
     morningResent: false,
     reminderSentFor: null,
     flights: [],
+    sleep: { ...DEFAULT_SLEEP },
     groupReadToken,
     checkinToken: newToken(),
     readTokens: [groupReadToken],
@@ -225,6 +232,17 @@ export async function recordCheckin(snap: TripSnap, input: CheckinInput): Promis
     );
   }
   return { nextDeadlineAt, tz, pushed, recovered };
+}
+
+/** 設定睡眠時段（旅人當地時間）；null 為關閉。期限不重算，只是有效期限的計算規則改變。 */
+export async function setSleep(snap: TripSnap, sleep: SleepWindow | null): Promise<void> {
+  const trip = snap.data();
+  const patch: Partial<Trip> = { sleep, reminderSentFor: null, updatedAt: Timestamp.now() };
+  const updated: Trip = { ...trip, ...patch };
+  const batch = db.batch();
+  batch.update(snap.ref, patch);
+  await syncViews(snap.id, updated, { batch });
+  await batch.commit();
 }
 
 /** 免登入打卡頁 token：舊行程沒有就補上。 */

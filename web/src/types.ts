@@ -60,6 +60,9 @@ export interface View {
   offlineUntil: Timestamp | null;
   alerted: boolean;
   flights?: FlightSeg[];
+  effectiveDeadlineAt?: Timestamp;
+  deadlineShift?: DeadlineShift;
+  sleep?: SleepWindow | null;
   recent: RecentItem[];
   updatedAt: Timestamp;
 }
@@ -85,7 +88,18 @@ export interface TripJson {
   checkinToken: string | null;
   checkinUrl: string | null;
   flights: FlightJson[];
+  /** 睡眠時段（旅人當地 HH:mm），null 為關閉。 */
+  sleep: SleepWindow | null;
+  /** 套用航段與睡眠順延後的有效期限與原因。 */
+  effectiveDeadlineAt: string;
+  deadlineShift: DeadlineShift;
 }
+
+export interface SleepWindow {
+  start: string;
+  end: string;
+}
+export type DeadlineShift = 'none' | 'flight' | 'sleep';
 
 /** GET /api/trips/:id/checkins 的一筆。 */
 export interface CheckinJson {
@@ -111,6 +125,8 @@ export interface CheckinPageJson {
   lastCheckinAt: string | null;
   lastCheckinPlace: string | null;
   nextDeadlineAt: string | null;
+  effectiveDeadlineAt: string | null;
+  deadlineShift: DeadlineShift;
   offlineUntil: string | null;
   alerted: boolean;
 }

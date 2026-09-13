@@ -133,7 +133,8 @@ export function renderFamilyPage(root: HTMLElement, token: string, tlOpts: Timel
     const now = new Date();
     const last = view.lastCheckinAt ? view.lastCheckinAt.toDate() : null;
     const wins = toWindows(view.flights);
-    const deadline = effectiveDeadline(view.nextDeadlineAt.toDate(), wins);
+    const deadline = view.effectiveDeadlineAt ? view.effectiveDeadlineAt.toDate() : effectiveDeadline(view.nextDeadlineAt.toDate(), wins);
+    const sleeping = view.deadlineShift === 'sleep';
     const offlineUntil = view.offlineUntil ? view.offlineUntil.toDate() : null;
     const inFlight = view.status === 'active' ? currentFlight(wins, now) : null;
     const overdue = view.status === 'active' && deadline < now && !(offlineUntil && offlineUntil > now) && !inFlight;
@@ -165,7 +166,7 @@ export function renderFamilyPage(root: HTMLElement, token: string, tlOpts: Timel
     } else {
       cls = 'ok';
       head = `最後回報：${fmtAgo(last, now)}`;
-      sub = `下次期限 ${fmtBoth(deadline, view.travelerTz)}`;
+      sub = sleeping ? `😴 睡眠時段，期限順延至 ${fmtBoth(deadline, view.travelerTz)}` : `下次期限 ${fmtBoth(deadline, view.travelerTz)}`;
     }
 
     const lastLine = last

@@ -279,6 +279,21 @@ async function main() {
   assert.equal((await call('PATCH', `/trips/${trip.id}`, { intervalHours: 12 })).status, 200);
   log('interval change recomputes deadline');
 
+  // 睡眠時段設定
+  r = await call('GET', '/status');
+  assert.deepEqual(r.json.activeTrip.sleep, { start: '23:00', end: '08:00' }, 'default sleep window');
+  assert.ok(r.json.activeTrip.effectiveDeadlineAt && r.json.activeTrip.deadlineShift);
+  r = await call('PATCH', `/trips/${trip.id}`, { sleep: { start: '01:00', end: '02:00' } });
+  assert.equal(r.status, 200, JSON.stringify(r.json));
+  assert.deepEqual(r.json.sleep, { start: '01:00', end: '02:00' });
+  assert.deepEqual((await db.doc(`views/${trip.groupReadToken}`).get()).data().sleep, { start: '01:00', end: '02:00' }, 'view carries sleep');
+  r = await call('PATCH', `/trips/${trip.id}`, { sleep: null });
+  assert.equal(r.status, 200);
+  assert.equal(r.json.sleep, null);
+  assert.equal((await call('PATCH', `/trips/${trip.id}`, { sleep: { start: '25:00', end: '08:00' } })).status, 400);
+  assert.equal((await call('PATCH', `/trips/${trip.id}`, {})).status, 400);
+  log('sleep window settings ok');
+
   // ---- 免登入打卡頁 /c/{token}：不帶任何憑證 ----
   assert.ok(trip.checkinToken && trip.checkinUrl.endsWith(`/c/${trip.checkinToken}`), 'trip has checkin token');
   const JSON_H = { 'content-type': 'application/json' };

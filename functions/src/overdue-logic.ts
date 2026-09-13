@@ -9,7 +9,8 @@
  * - endAt + 24h 仍未結案 → 自動結案。
  * - 預告離線期間不警報。
  */
-import { HOUR_MS, hoursBetween, inQuietHours, isMorningWindow } from './time.js';
+import { HOUR_MS, hoursBetween, inQuietHours, isMorningWindow, localYmdMin, nextYmd, zonedToUtc } from './time.js';
+import type { DeadlineShift, SleepWindow } from './types.js';
 
 export const REPEAT_H = 3;
 export const MAX_ALERTS = 4;
@@ -18,6 +19,47 @@ export const AUTO_COMPLETE_GRACE_H = 24;
 export const BOARDING_LEAD_H = 2;
 /** 降落後多久內必須回報。 */
 export const LANDING_GRACE_H = 3;
+/** 睡眠時段結束後多久內必須回報。 */
+export const SLEEP_GRACE_H = 1;
+/** 未設定時的睡眠時段（旅人當地時間）。 */
+export const DEFAULT_SLEEP: SleepWindow = { start: '23:00', end: '08:00' };
+
+/** 舊資料沒有 sleep 欄位 → 預設；明確 null → 關閉。 */
+export function sleepOf(t: { sleep?: SleepWindow | null }): SleepWindow | null {
+  return t.sleep === undefined ? DEFAULT_SLEEP : t.sleep;
+}
+
+const HHMM = /^(\d{2}):(\d{2})$/;
+function toMin(hhmm: string): number | null {
+  const m = hhmm.match(HHMM);
+  if (!m) return null;
+  const h = Number(m[1]);
+  const mi = Number(m[2]);
+  return h > 23 || mi > 59 ? null : h * 60 + mi;
+}
+
+/**
+ * 期限落在睡眠時段（旅人當地時間）內 → 順延到該段結束 + SLEEP_GRACE_H；否則原樣。
+ * 時段可跨午夜（23:00–08:00）；start === end 視為關閉。
+ */
+export function sleepShift(deadline: Date, sleep: SleepWindow | null | undefined, tz: string | undefined): Date {
+  if (!sleep || !tz) return deadline;
+  const start = toMin(sleep.start);
+  const end = toMin(sleep.end);
+  if (start === null || end === null || start === end) return deadline;
+  const { ymd, min } = localYmdMin(deadline, tz);
+  let endYmd: string | null = null;
+  if (start > end) {
+    // 跨午夜：23:00–08:00
+    if (min >= start) endYmd = nextYmd(ymd);
+    else if (min < end) endYmd = ymd;
+  } else if (min >= start && min < end) {
+    endYmd = ymd;
+  }
+  if (!endYmd) return deadline;
+  const endUtc = zonedToUtc(`${endYmd}T${sleep.end}`, tz);
+  return new Date(endUtc.getTime() + SLEEP_GRACE_H * HOUR_MS);
+}
 /** 期限前多久私訊提醒旅人（每個期限最多一次）。 */
 /* 75 分鐘搭配 15 分鐘掃描，提醒一定落在期限前 60–75 分鐘（至少提前一小時）。 */
 export const REMIND_LEAD_H = 1.25;
@@ -40,6 +82,9 @@ export interface OverdueState {
   morningResent: boolean;
   /** 上次到期提醒對應的（有效）期限；同一期限不重複提醒。 */
   reminderSentFor?: Date | null;
+  /** 睡眠時段與旅人時區；未提供則不做睡眠順延。 */
+  sleep?: SleepWindow | null;
+  travelerTz?: string;
 }
 
 export type OverdueDecision =
@@ -65,7 +110,7 @@ export function currentFlight<T extends FlightWindow>(flights: T[] | undefined, 
  * 把期限依航段順延：若期限落在某航段的飛行窗內，改為該航段降落 + LANDING_GRACE_H；
  * 連續套用以處理轉機。
  */
-export function effectiveDeadline(deadline: Date, flights: FlightWindow[] | undefined): Date {
+function flightShift(deadline: Date, flights: FlightWindow[] | undefined): Date {
   let d = deadline;
   const sorted = [...(flights ?? [])].sort((a, b) => a.departAt.getTime() - b.departAt.getTime());
   for (const f of sorted) {
@@ -79,13 +124,49 @@ export function effectiveDeadline(deadline: Date, flights: FlightWindow[] | unde
 }
 
 /**
+ * 有效期限：先依航段順延，再依睡眠時段順延，反覆直到穩定（落地後的寬限可能又落進睡眠時段，反之亦然）。
+ * 不帶 sleep / tz 時只做航段順延（舊呼叫端相容）。
+ */
+export function effectiveDeadline(deadline: Date, flights: FlightWindow[] | undefined, sleep?: SleepWindow | null, tz?: string): Date {
+  let d = deadline;
+  for (let i = 0; i < 4; i++) {
+    const next = sleepShift(flightShift(d, flights), sleep, tz);
+    if (next.getTime() === d.getTime()) break;
+    d = next;
+  }
+  return d;
+}
+
+/** 順延原因：睡眠時段（可能疊在航段上）、僅航段、或無。 */
+export function deadlineShiftKind(deadline: Date, flights: FlightWindow[] | undefined, sleep: SleepWindow | null | undefined, tz: string | undefined): DeadlineShift {
+  const full = effectiveDeadline(deadline, flights, sleep, tz);
+  const flightsOnly = effectiveDeadline(deadline, flights);
+  if (full.getTime() > flightsOnly.getTime()) return 'sleep';
+  if (flightsOnly.getTime() > deadline.getTime()) return 'flight';
+  return 'none';
+}
+
+/** 給 Firestore 文件（Timestamp 欄位）直接算有效期限與原因。 */
+export function tripDeadline(t: {
+  nextDeadlineAt: { toDate(): Date };
+  flights?: Array<{ departAt: { toDate(): Date }; arriveAt: { toDate(): Date } }>;
+  sleep?: SleepWindow | null;
+  travelerTz: string;
+}): { at: Date; kind: DeadlineShift } {
+  const flights = (t.flights ?? []).map((f) => ({ departAt: f.departAt.toDate(), arriveAt: f.arriveAt.toDate() }));
+  const raw = t.nextDeadlineAt.toDate();
+  const sleep = sleepOf(t);
+  return { at: effectiveDeadline(raw, flights, sleep, t.travelerTz), kind: deadlineShiftKind(raw, flights, sleep, t.travelerTz) };
+}
+
+/**
  * 到期前提醒：有效期限落在 (now, now + REMIND_LEAD_H] 內、行程已開始、不在預告離線與飛行中、
  * 且尚未針對這個期限提醒過 → 回傳該期限（呼叫端記到 reminderSentFor）；否則 null。
  */
 export function decideReminder(s: OverdueState, now: Date): Date | null {
   if (s.startAt.getTime() > now.getTime()) return null;
   if (s.endAt.getTime() + AUTO_COMPLETE_GRACE_H * HOUR_MS < now.getTime()) return null;
-  const deadline = effectiveDeadline(s.nextDeadlineAt, s.flights);
+  const deadline = effectiveDeadline(s.nextDeadlineAt, s.flights, s.sleep, s.travelerTz);
   const remaining = deadline.getTime() - now.getTime();
   if (remaining <= 0 || remaining > REMIND_LEAD_H * HOUR_MS) return null;
   if (s.offlineUntil && s.offlineUntil.getTime() > now.getTime()) return null;
@@ -100,7 +181,7 @@ export function decideOverdue(s: OverdueState, now: Date): OverdueDecision {
   }
   // 行程尚未開始：不警報（開始前的打卡只是測試或提早回報）。
   if (s.startAt.getTime() > now.getTime()) return { action: 'none' };
-  const deadline = effectiveDeadline(s.nextDeadlineAt, s.flights);
+  const deadline = effectiveDeadline(s.nextDeadlineAt, s.flights, s.sleep, s.travelerTz);
   if (deadline.getTime() > now.getTime()) return { action: 'none' };
   if (s.offlineUntil && s.offlineUntil.getTime() > now.getTime()) return { action: 'none' };
   if (currentFlight(s.flights, now)) return { action: 'none' };

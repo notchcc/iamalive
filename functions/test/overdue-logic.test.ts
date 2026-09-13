@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MAX_ALERTS, REMIND_LEAD_H, REPEAT_H, decideOverdue, decideReminder, type OverdueState } from '../src/overdue-logic.js';
+import { MAX_ALERTS, REMIND_LEAD_H, REPEAT_H, deadlineShiftKind, decideOverdue, decideReminder, sleepShift, type OverdueState } from '../src/overdue-logic.js';
 
 const H = 3_600_000;
 /** 台北 2026-09-05 12:00 = 04:00Z */
@@ -163,5 +163,46 @@ describe('decideReminder', () => {
     // 原期限落在飛行窗內 → 有效期限 = 降落 + 3h = NOON + 1h → 剛好在提醒範圍
     const s = base({ nextDeadlineAt: new Date(NOON.getTime() - 4 * H), flights: [{ departAt: dep, arriveAt: arr }] });
     expect(decideReminder(s, NOON)).toEqual(new Date(NOON.getTime() + H));
+  });
+});
+
+describe('sleep window', () => {
+  const TPE = 'Asia/Taipei';
+  const SLEEP = { start: '23:00', end: '08:00' };
+  // 台北 09-05 02:00 = 09-04 18:00Z；睡眠結束 08:00 + 1h = 09:00 台北 = 01:00Z
+  const NIGHT_DL = new Date('2026-09-04T18:00:00Z');
+  const SHIFTED = new Date('2026-09-05T01:00:00Z');
+
+  it('shifts a deadline inside the window to end + SLEEP_GRACE_H', () => {
+    expect(sleepShift(NIGHT_DL, SLEEP, TPE)).toEqual(SHIFTED);
+    // 23:30 台北（跨午夜前半段）→ 隔天 09:00
+    expect(sleepShift(new Date('2026-09-04T15:30:00Z'), SLEEP, TPE)).toEqual(SHIFTED);
+  });
+
+  it('leaves daytime deadlines, disabled or missing windows alone', () => {
+    const noon = new Date('2026-09-05T04:00:00Z');
+    expect(sleepShift(noon, SLEEP, TPE)).toEqual(noon);
+    expect(sleepShift(NIGHT_DL, null, TPE)).toEqual(NIGHT_DL);
+    expect(sleepShift(NIGHT_DL, { start: '08:00', end: '08:00' }, TPE)).toEqual(NIGHT_DL);
+    // 不跨午夜的時段
+    expect(sleepShift(NIGHT_DL, { start: '01:00', end: '03:00' }, TPE)).toEqual(new Date('2026-09-04T20:00:00Z'));
+  });
+
+  it('is applied by decideOverdue and decideReminder', () => {
+    const s = base({ nextDeadlineAt: NIGHT_DL, sleep: SLEEP, travelerTz: TPE });
+    expect(decideOverdue(s, new Date('2026-09-04T19:00:00Z'))).toEqual({ action: 'none' }); // 台北 03:00
+    expect(decideOverdue(s, new Date('2026-09-05T01:30:00Z')).action).toBe('alert'); // 台北 09:30
+    // 台北 08:00 → 距 09:00 一小時 → 提醒
+    expect(decideReminder(s, new Date('2026-09-05T00:00:00Z'))).toEqual(SHIFTED);
+    // 沒有睡眠時段時同一時刻已逾時
+    expect(decideOverdue(base({ nextDeadlineAt: NIGHT_DL }), new Date('2026-09-04T19:00:00Z')).action).toBe('alert');
+  });
+
+  it('reports the shift kind', () => {
+    expect(deadlineShiftKind(NIGHT_DL, [], SLEEP, TPE)).toBe('sleep');
+    expect(deadlineShiftKind(new Date('2026-09-05T04:00:00Z'), [], SLEEP, TPE)).toBe('none');
+    const dep = new Date('2026-09-05T03:00:00Z');
+    const arr = new Date('2026-09-05T06:00:00Z');
+    expect(deadlineShiftKind(new Date('2026-09-05T04:00:00Z'), [{ departAt: dep, arriveAt: arr }], null, TPE)).toBe('flight');
   });
 });

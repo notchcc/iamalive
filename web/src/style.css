@@ -171,3 +171,6 @@ details.manual summary { cursor: pointer; font-size: 14px; }
 .share-collapsed .row { margin: 6px 0 4px; }
 .share-collapsed input { font-size: 13px; }
 .tl-more { text-align: center; color: var(--muted); font-size: 13px; min-height: 24px; padding: 6px 0 12px; }
+
+label.inline { display: inline-flex; align-items: center; gap: 6px; margin: 0; color: var(--text); }
+label.inline input { width: auto; margin: 0; }

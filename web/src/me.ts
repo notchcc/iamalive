@@ -387,14 +387,15 @@ export function renderMePage(root: HTMLElement): () => void {
   // ---- 共用：行程摘要卡 ----
   const renderTripSummary = (t: TripJson): string => {
     const now = new Date();
-    const deadline = new Date(t.nextDeadlineAt);
+    const deadline = new Date(t.effectiveDeadlineAt ?? t.nextDeadlineAt);
+    const shiftNote = t.deadlineShift === 'sleep' ? '（睡眠時段順延）' : t.deadlineShift === 'flight' ? '（航段順延）' : '';
     const offline = t.offlineUntil ? new Date(t.offlineUntil) : null;
     return `
       <section class="card">
         <h2>${esc(t.title)} <span class="muted">每 ${t.intervalHours} 小時</span></h2>
         <div>${fmtDateTime(new Date(t.startAt), TAIPEI)} → ${fmtDateTime(new Date(t.endAt), TAIPEI)}（台北）</div>
         <div>最後回報：${t.lastCheckinAt ? `${t.lastCheckinPlace ? `📍 ${esc(t.lastCheckinPlace)} · ` : ''}${esc(fmtBoth(new Date(t.lastCheckinAt), t.travelerTz))}` : '尚無'}</div>
-        <div>下次期限：${esc(fmtBoth(deadline, t.travelerTz))} ${deadline < now ? '<b class="bad-text">已逾時</b>' : ''}</div>
+        <div>下次期限：${esc(fmtBoth(deadline, t.travelerTz))}${esc(shiftNote)} ${deadline < now ? '<b class="bad-text">已逾時</b>' : ''}</div>
         ${offline && offline > now ? `<div>✈️ 預告離線至 ${esc(fmtBoth(offline, t.travelerTz))}</div>` : ''}
         ${t.alerted ? `<div class="bad-text">⚠️ 已發出逾時警報 ${t.alertCount} 則</div>` : ''}
       </section>`;
@@ -435,6 +436,18 @@ export function renderMePage(root: HTMLElement): () => void {
         <h2>打卡頻率 <span class="muted">目前每 ${t.intervalHours} 小時</span></h2>
         <form id="interval" class="row"><input name="hours" type="number" min="1" max="72" value="${t.intervalHours}" required /><span>小時</span><button>更改並重算期限</button></form>
         <p class="muted small">期限會立即改為「最後打卡 + 新間隔」；若已經過了，則為現在 + 新間隔。不會通知群組。</p>
+      </section>
+
+      <section class="card">
+        <h2>睡眠時段 <span class="muted">旅人當地時間</span></h2>
+        <form id="sleep" class="row">
+          <label class="inline"><input type="checkbox" name="enabled"${t.sleep ? ' checked' : ''} /> 啟用</label>
+          <input name="start" type="time" value="${esc(t.sleep?.start ?? '23:00')}" required style="max-width:130px" />
+          <span>到</span>
+          <input name="end" type="time" value="${esc(t.sleep?.end ?? '08:00')}" required style="max-width:130px" />
+          <button>儲存</button>
+        </form>
+        <p class="muted small">期限落在這段時間內會自動順延到結束後 1 小時才算逾時，到期前的提醒也會等到那時候才送；可跨午夜。睡前忘了打卡不會半夜誤發警報。</p>
       </section>
 
       <section class="card">
@@ -638,6 +651,25 @@ export function renderMePage(root: HTMLElement): () => void {
       try {
         const r = await api.setInterval(t.id, hours);
         toast(`已改為每 ${r.intervalHours} 小時，下次期限 ${fmtBoth(new Date(r.nextDeadlineAt), t.travelerTz)}`);
+        await load();
+      } catch (err) {
+        toast(errText(err), 'err');
+      }
+    });
+
+    root.querySelector<HTMLFormElement>('#sleep')!.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const fd = new FormData(e.currentTarget as HTMLFormElement);
+      const enabled = fd.get('enabled') === 'on';
+      const start = String(fd.get('start'));
+      const end = String(fd.get('end'));
+      if (enabled && start === end) {
+        toast('開始與結束時間不能相同', 'err');
+        return;
+      }
+      try {
+        const r = await api.patchTrip(t.id, { sleep: enabled ? { start, end } : null });
+        toast(enabled ? `睡眠時段 ${start}–${end}，有效期限 ${fmtBoth(new Date(r.effectiveDeadlineAt), t.travelerTz)}` : '已關閉睡眠時段');
         await load();
       } catch (err) {
         toast(errText(err), 'err');

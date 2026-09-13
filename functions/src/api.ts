@@ -40,13 +40,14 @@ import {
   requireActiveTrip,
   setFlights,
   setIntervalHours,
+  setSleep,
   setOffline,
   ensureCheckinToken,
   rotateCheckinToken,
   getTripByCheckinToken,
 } from './trips.js';
 import { TAIPEI, fmtBoth, fmtDateTime, fmtHours, isValidTz, monthKey, tzLabel, zonedToUtc } from './time.js';
-import { currentFlight } from './overdue-logic.js';
+import { currentFlight, sleepOf, tripDeadline } from './overdue-logic.js';
 import type { FlightSegment } from './types.js';
 import { parseMultipart } from './multipart.js';
 import { lookupFlight } from './flights-api.js';
@@ -89,7 +90,11 @@ const CreateTripSchema = z
   .refine((v) => v.endAt > v.startAt, { message: 'endAt must be after startAt' });
 
 const OfflineSchema = z.object({ hours: z.number().min(1).max(168) });
-const PatchTripSchema = z.object({ intervalHours: z.number().int().min(1).max(72) });
+const HHMM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+const SleepSchema = z.object({ start: z.string().regex(HHMM_RE), end: z.string().regex(HHMM_RE) }).refine((s) => s.start !== s.end, 'start and end must differ');
+const PatchTripSchema = z
+  .object({ intervalHours: z.number().int().min(1).max(72).optional(), sleep: SleepSchema.nullable().optional() })
+  .refine((b) => b.intervalHours !== undefined || b.sleep !== undefined, 'nothing to update');
 
 const localDateTime = z.string().regex(/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?$/, 'YYYY-MM-DDTHH:mm');
 const tzString = z.string().min(1).max(64).refine(isValidTz, 'invalid IANA timezone');
@@ -159,6 +164,9 @@ function tripJson(id: string, t: FirebaseFirestore.DocumentData) {
     familyUrl: familyUrl(t.groupReadToken),
     checkinToken: t.checkinToken ?? null,
     checkinUrl: t.checkinToken ? checkinUrl(t.checkinToken) : null,
+    sleep: sleepOf(t as { sleep?: import('./types.js').SleepWindow | null }),
+    effectiveDeadlineAt: tripDeadline(t as Parameters<typeof tripDeadline>[0]).at.toISOString(),
+    deadlineShift: tripDeadline(t as Parameters<typeof tripDeadline>[0]).kind,
   };
 }
 
@@ -173,6 +181,8 @@ function checkinPageJson(t: FirebaseFirestore.DocumentData) {
     lastCheckinAt: ts(t.lastCheckinAt),
     lastCheckinPlace: t.lastCheckinPlace ?? null,
     nextDeadlineAt: ts(t.nextDeadlineAt),
+    effectiveDeadlineAt: tripDeadline(t as Parameters<typeof tripDeadline>[0]).at.toISOString(),
+    deadlineShift: tripDeadline(t as Parameters<typeof tripDeadline>[0]).kind,
     offlineUntil: ts(t.offlineUntil),
     alerted: t.alerted,
   };
@@ -277,7 +287,8 @@ export function createApp(): express.Express {
       const tz = t.travelerTz;
       const flights = (t.flights ?? []).map((f) => ({ ...f, departAt: f.departAt.toDate(), arriveAt: f.arriveAt.toDate() }));
       const inFlight = currentFlight(flights, now);
-      const deadline = t.nextDeadlineAt.toDate();
+      const eff = tripDeadline(t);
+      const deadline = eff.at;
       const offline = t.offlineUntil ? t.offlineUntil.toDate() : null;
       const last = t.lastCheckinAt ? t.lastCheckinAt.toDate() : null;
       const state = t.status !== 'active' ? 'completed' : inFlight ? 'in_flight' : offline && offline > now ? 'offline' : deadline < now ? 'overdue' : 'ok';
@@ -320,6 +331,8 @@ export function createApp(): express.Express {
           lastCheckinPlace: t.lastCheckinPlace ?? null,
           nextDeadlineAt: deadline.toISOString(),
           nextDeadlineBoth: fmtBoth(deadline, tz),
+          deadlineShift: eff.kind,
+          sleep: sleepOf(t),
           offlineUntil: offline ? offline.toISOString() : null,
           alerted: t.alerted,
           alertCount: t.alertCount,
@@ -336,7 +349,7 @@ export function createApp(): express.Express {
           `產生時間：台北 ${body.generatedAtTaipei}；旅人所在時區 ${body.trip.travelerTzLabel}，當地 ${body.trip.nowLocal}`,
           `行程：台北 ${body.trip.startAtTaipei} → ${body.trip.endAtTaipei}，每 ${t.intervalHours} 小時回報`,
           `最後回報：${last ? `${t.lastCheckinPlace ? `${t.lastCheckinPlace} · ` : ''}${body.trip.lastCheckinBoth}（${body.trip.lastCheckinAgo}前）` : '尚無'}`,
-          `下次期限：${body.trip.nextDeadlineBoth}${state === 'overdue' ? `（已逾時，已發警報 ${t.alertCount} 則）` : ''}`,
+          `下次期限：${body.trip.nextDeadlineBoth}${eff.kind === 'sleep' ? '（睡眠時段順延）' : eff.kind === 'flight' ? '（航段順延）' : ''}${state === 'overdue' ? `（已逾時，已發警報 ${t.alertCount} 則）` : ''}`,
           ...(inFlight ? [`目前飛行中：${inFlight.flightNo} ${inFlight.fromCity} → ${inFlight.toCity}，預計 ${fmtBoth(inFlight.arriveAt, inFlight.toTz)} 降落`] : []),
           ...(offline && offline > now ? [`預告離線至：${fmtBoth(offline, tz)}`] : []),
           ...(body.trip.flights.length ? ['', '## 航段', ...body.trip.flights.map((f) => `- ${f.flightNo} ${f.fromCity} ${f.departLocal} → ${f.toCity} ${f.arriveLocal}（各地當地時間）`)] : []),
@@ -656,10 +669,19 @@ export function createApp(): express.Express {
   r.patch(
     '/trips/:id',
     wrap(async (req, res) => {
-      const { intervalHours } = PatchTripSchema.parse(req.body);
+      const body = PatchTripSchema.parse(req.body);
       const trip = await requireTrip(uidOf(res), req.params.id);
-      const out = await setIntervalHours(trip, intervalHours);
-      res.json({ ok: true, intervalHours: out.intervalHours, nextDeadlineAt: out.nextDeadlineAt.toISOString() });
+      if (body.sleep !== undefined) await setSleep(trip, body.sleep);
+      let out: { intervalHours: number; nextDeadlineAt: Date } | null = null;
+      if (body.intervalHours !== undefined) out = await setIntervalHours((await tripsCol.doc(trip.id).get()) as typeof trip, body.intervalHours);
+      const fresh = (await tripsCol.doc(trip.id).get()).data()!;
+      res.json({
+        ok: true,
+        intervalHours: out ? out.intervalHours : fresh.intervalHours,
+        nextDeadlineAt: (out ? out.nextDeadlineAt : fresh.nextDeadlineAt.toDate()).toISOString(),
+        sleep: sleepOf(fresh),
+        effectiveDeadlineAt: tripDeadline(fresh).at.toISOString(),
+      });
     }),
   );
 

@@ -15,6 +15,14 @@ export interface FlightSegment {
   arriveAt: Timestamp;
 }
 
+/** 睡眠時段（旅人當地時間，HH:mm）；期限落在此段內順延到結束 + SLEEP_GRACE_H。 */
+export interface SleepWindow {
+  start: string;
+  end: string;
+}
+
+export type DeadlineShift = 'none' | 'flight' | 'sleep';
+
 export interface Trip {
   /** 擁有者（LINE userId）。 */
   ownerUid: string;
@@ -39,6 +47,8 @@ export interface Trip {
   reminderSentFor?: Timestamp | null;
   /** 航段（依 departAt 排序），飛行中不警報、期限順延到降落後。 */
   flights: FlightSegment[];
+  /** 睡眠時段（當地時間）。null 表示關閉；舊資料沒有此欄位視為預設 23:00–08:00。 */
+  sleep?: SleepWindow | null;
   /** 群組訊息內附的家人頁 token（建立行程時自動產生）。 */
   groupReadToken: string;
   /** 免登入打卡頁 /c/{token} 的能力型 token；可輪替。舊資料可能沒有，讀取時補上。 */
@@ -92,6 +102,10 @@ export interface View {
   offlineUntil: Timestamp | null;
   alerted: boolean;
   flights: FlightSegment[];
+  /** 套用航段與睡眠時段順延後的有效期限，以及順延原因。 */
+  effectiveDeadlineAt: Timestamp;
+  deadlineShift: DeadlineShift;
+  sleep: SleepWindow | null;
   recent: RecentItem[];
   updatedAt: Timestamp;
 }

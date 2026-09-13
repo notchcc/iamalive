@@ -6,7 +6,7 @@ import { familyUrl } from './config.js';
 import { Timestamp, pendingPhotosCol, tripsCol } from './db.js';
 import { deletePhoto } from './photos.js';
 import { alertMessages, pushGroup, pushUser, reminderMessages } from './line.js';
-import { REMIND_LEAD_H, decideOverdue, decideReminder, type OverdueState } from './overdue-logic.js';
+import { REMIND_LEAD_H, decideOverdue, decideReminder, sleepOf, type OverdueState } from './overdue-logic.js';
 import { HOUR_MS } from './time.js';
 import { endTrip, syncViews } from './trips.js';
 import type { Trip } from './types.js';
@@ -24,6 +24,8 @@ function toState(t: Trip): OverdueState {
     morningResendDue: t.morningResendDue,
     morningResent: t.morningResent,
     reminderSentFor: t.reminderSentFor ? t.reminderSentFor.toDate() : null,
+    sleep: sleepOf(t),
+    travelerTz: t.travelerTz,
   };
 }
 

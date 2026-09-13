@@ -86,7 +86,8 @@ export function renderCheckinPage(root: HTMLElement, token: string): () => void 
     if (!info) return;
     const now = new Date();
     const last = info.lastCheckinAt ? new Date(info.lastCheckinAt) : null;
-    const deadline = info.nextDeadlineAt ? new Date(info.nextDeadlineAt) : null;
+    const deadline = info.effectiveDeadlineAt ? new Date(info.effectiveDeadlineAt) : info.nextDeadlineAt ? new Date(info.nextDeadlineAt) : null;
+    const shiftNote = info.deadlineShift === 'sleep' ? '（睡眠時段順延）' : info.deadlineShift === 'flight' ? '（航段順延）' : '';
     const offline = info.offlineUntil ? new Date(info.offlineUntil) : null;
     const overdue = deadline ? deadline < now : false;
     const cls = info.status !== 'active' ? 'idle' : overdue ? 'bad' : 'ok';
@@ -95,7 +96,7 @@ export function renderCheckinPage(root: HTMLElement, token: string): () => void 
       <div class="trip-title">${esc(info.title)} <span class="muted">每 ${info.intervalHours} 小時回報</span></div>
       <div class="head">${info.status !== 'active' ? '行程已結束' : last ? `最後回報：${esc(fmtAgo(last, now))}` : '尚未回報'}</div>
       ${last ? `<div class="last">${info.lastCheckinPlace ? `📍 ${esc(info.lastCheckinPlace)} · ` : ''}${esc(fmtBoth(last, info.travelerTz))}</div>` : ''}
-      ${deadline ? `<div class="sub">下次期限 ${esc(fmtBoth(deadline, info.travelerTz))}${overdue ? ' <b>已逾時</b>' : ''}</div>` : ''}
+      ${deadline ? `<div class="sub">下次期限 ${esc(fmtBoth(deadline, info.travelerTz))}${esc(shiftNote)}${overdue ? ' <b>已逾時</b>' : ''}</div>` : ''}
       ${offline && offline > now ? `<div class="sub">✈️ 預告離線至 ${esc(fmtBoth(offline, info.travelerTz))}</div>` : ''}`;
   };
 

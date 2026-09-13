@@ -72,6 +72,19 @@ function parts(date: Date, tz: string): Record<string, string> {
   return out;
 }
 
+/** 某時區的當地日期（YYYY-MM-DD）與當日分鐘數（0–1439）。 */
+export function localYmdMin(date: Date, tz: string): { ymd: string; min: number } {
+  const p = parts(date, tz);
+  return { ymd: `${p.year}-${p.month}-${p.day}`, min: Number(p.hour) * 60 + Number(p.minute) };
+}
+
+/** YYYY-MM-DD 的隔天。 */
+export function nextYmd(ymd: string): string {
+  const d = new Date(`${ymd}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
 /** 某時區的小時（0–23）。 */
 export function hourIn(date: Date, tz: string): number {
   return Number(parts(date, tz).hour);
