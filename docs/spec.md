@@ -287,6 +287,8 @@ Response: { ok: true, nextDeadlineAt, tz, pushed: boolean }
 4. batch：新增 checkin（含 `tz`）；更新 trip（`lastCheckinAt`、`lastCheckinGeo`、`travelerTz = tz`、`nextDeadlineAt = now + (nextHours ?? intervalHours)`、`offlineUntil = null`、`alerted = false`、`alertCount = 0`、`morningResendDue = false`、`morningResent = false`）；更新所有 views。
 5. **打卡本身不推群組。** 唯一例外：打卡前 `alerted == true`，推「已恢復回報」（位置訊息 + 連結文字），`pushed = true`。
 
+**回填打卡時間**：`at`（JSON）或 `useTakenAt=1`（照片 multipart，取 `takenAt`）可把打卡時間設為過去 7 天內的某一刻（例如照片拍攝時間）。規則：`createdAt = at`；若 `at` 比目前最後一筆新 → 成為最後回報、期限 = `at + 間隔`（已過則改為現在 + 間隔，上傳本身證明現在平安），警報旗標歸零；若比最後一筆舊 → 只補進歷史，不動最後位置、期限與警報。未來或超過 7 天回 400 `AT_OUT_OF_RANGE`。
+
 ### 5.3 Function `lineWebhook`（`POST /line/webhook`，獨立 URL）
 
 - 驗證 `x-line-signature`（HMAC-SHA256，Channel Secret），失敗回 401。
@@ -401,7 +403,7 @@ reply 免費，不計額度。非旅行者傳的位置訊息忽略。
 ### 6.4 打卡頁 `/c/{token}`（免登入，主畫面捷徑 / PWA）
 
 - 每趟行程建立時產生 `checkinToken`（與 readToken 同格式，22 字元 URL-safe）；舊行程在 `/status` 讀取時補上。
-- 頁面：狀態卡（最後回報多久前、地點、下次期限、離線）、備註與下次回報欄、三個大按鈕「定位打卡 / 拍照打卡 / 選擇照片」。拍照走 `capture=environment`，沒有 GPS 時自動改用目前定位。頁面可見（切回前景）時自動重新整理，30 秒更新「多久前」。
+- 頁面：狀態卡（最後回報多久前、地點、下次期限、離線）、備註與下次回報欄、三個大按鈕「定位打卡 / 拍照打卡 / 選擇照片」。從圖庫選的照片若拍攝時間在過去 7 天內且非剛拍，會出現「以拍攝時間為打卡時間」勾選（預設不勾）。拍照走 `capture=environment`，沒有 GPS 時自動改用目前定位。頁面可見（切回前景）時自動重新整理，30 秒更新「多久前」。
 - 頁面底部「本頁連結」列（家人頁同樣有）：顯示網址、複製、開啟；LIFF 內「開啟」以 `liff.openWindow({external:true})` 交給 Safari，才能加到主畫面。
 - 加到主畫面的身分依頁面切換（`pwa.ts` 於載入時替換 `<link rel=manifest>`、`apple-touch-icon`、`apple-mobile-web-app-title`、`theme-color`）：打卡頁為青綠圖釘、名稱「打卡」（`manifest-checkin.webmanifest`）；家人頁為琥珀色房子加愛心、名稱「家人頁」（`manifest-family.webmanifest`）；管理頁用預設。manifest 皆 `display: standalone`、不設 `start_url`（iOS 以加入時的網址為起點）。
 - 安全性：token 即能力，持有者只能看該行程摘要與打卡，不能改行程、看不到家人連結與照片；`/c/**` 加 `Referrer-Policy: same-origin` 與 `no-store`；外洩時在 `/me` 輪替。

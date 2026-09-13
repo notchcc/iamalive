@@ -231,6 +231,46 @@ async function main() {
     fd3.append('lng', '1');
     fd3.append('photo', new Blob(['hi'], { type: 'text/plain' }), 'x.txt');
     assert.equal((await fetch(`${BASE}/checkin/photo`, { method: 'POST', headers: authHeaders(), body: fd3 })).status, 415);
+    // 以拍攝時間為打卡時間：較新 → 成為最後一筆且期限由拍攝時間起算；較舊 → 只補進歷史
+    // 先把最後一筆推回 2 小時前，讓 30 分鐘前拍的照片成為「較新」的回填
+    await db.doc(`trips/${trip.id}`).update({ lastCheckinAt: Timestamp.fromDate(new Date(Date.now() - 2 * H)) });
+    const lastBefore = (await db.doc(`trips/${trip.id}`).get()).data().lastCheckinAt.toMillis();
+    const takenNew = new Date(Date.now() - 30 * 60_000);
+    const fdN = new FormData();
+    fdN.append('lat', '46.6863'); fdN.append('lng', '7.8632'); fdN.append('takenAt', takenNew.toISOString()); fdN.append('useTakenAt', '1');
+    fdN.append('photo', new Blob([jpeg], { type: 'image/jpeg' }), 'p.jpg');
+    const rN = await fetch(`${BASE}/checkin/photo`, { method: 'POST', headers: authHeaders(), body: fdN });
+    assert.equal(rN.status, 200, await rN.clone().text());
+    const jN = await rN.json();
+    let tdoc = (await db.doc(`trips/${trip.id}`).get()).data();
+    assert.equal(tdoc.lastCheckinAt.toMillis(), takenNew.getTime(), 'backdated newest photo becomes last check-in at takenAt');
+    assert.ok(tdoc.lastCheckinAt.toMillis() > lastBefore);
+    assert.ok(Math.abs(new Date(jN.nextDeadlineAt).getTime() - (takenNew.getTime() + tdoc.intervalHours * H)) < 60_000, 'deadline from takenAt');
+    const takenOld = new Date(Date.now() - 5 * H);
+    const fdO = new FormData();
+    fdO.append('lat', '46.0'); fdO.append('lng', '7.0'); fdO.append('takenAt', takenOld.toISOString()); fdO.append('useTakenAt', '1');
+    fdO.append('photo', new Blob([jpeg], { type: 'image/jpeg' }), 'p.jpg');
+    const rO = await fetch(`${BASE}/checkin/photo`, { method: 'POST', headers: authHeaders(), body: fdO });
+    assert.equal(rO.status, 200);
+    const tdoc2 = (await db.doc(`trips/${trip.id}`).get()).data();
+    assert.equal(tdoc2.lastCheckinAt.toMillis(), takenNew.getTime(), 'older backdated photo does not move last check-in');
+    assert.equal(tdoc2.nextDeadlineAt.toMillis(), tdoc.nextDeadlineAt.toMillis(), 'nor the deadline');
+    view = (await db.doc(`views/${trip.groupReadToken}`).get()).data();
+    const ats = view.recent.map((x) => x.at.toMillis());
+    assert.ok(ats.includes(takenNew.getTime()) && ats.includes(takenOld.getTime()), 'backdated items in recent');
+    assert.deepEqual(ats, [...ats].sort((a, b) => b - a), 'recent sorted by check-in time desc');
+    const fdBad = new FormData();
+    fdBad.append('lat', '46.0'); fdBad.append('lng', '7.0'); fdBad.append('takenAt', new Date(Date.now() - 9 * 86400e3).toISOString()); fdBad.append('useTakenAt', '1');
+    fdBad.append('photo', new Blob([jpeg], { type: 'image/jpeg' }), 'p.jpg');
+    assert.equal((await fetch(`${BASE}/checkin/photo`, { method: 'POST', headers: authHeaders(), body: fdBad })).status, 400, 'too old → 400');
+    r = await call('POST', '/checkin', { lat: 1, lng: 1, at: new Date(Date.now() + 3600e3).toISOString() });
+    assert.equal(r.status, 400, 'future at → 400');
+    // 清掉兩筆回填，回到只剩少女峰照片的狀態，後續刪除測試沿用原本期望
+    for (const it of view.recent.filter((x) => x.at.toMillis() === takenNew.getTime() || x.at.toMillis() === takenOld.getTime())) {
+      assert.equal((await call('DELETE', `/trips/${trip.id}/checkins/${it.id}`)).status, 200);
+    }
+    view = (await db.doc(`views/${trip.groupReadToken}`).get()).data();
+    assert.equal(view.recent[0].photoId, j0.photoId, 'back to the first photo as newest');
     log('photo checkin + photo serving ok');
 
     // 刪除該筆打卡：紀錄消失、照片 404、view 更新、最後回報退回前一筆、期限不變

@@ -68,7 +68,16 @@ const CheckinSchema = z.object({
   note: z.string().max(200).optional().default(''),
   nextHours: z.number().min(1).max(168).nullable().optional(),
   clientAt: isoDate.nullable().optional(),
+  /** 以此時間當打卡時間（過去 7 天內），例如捷徑帶入照片拍攝時間 */
+  at: isoDate.nullable().optional(),
 });
+
+/** 回填時間：不可在未來（容許 10 分鐘時鐘誤差）、不可早於 7 天前。 */
+function checkBackdate(at: Date | null | undefined, now = new Date()): Date | null {
+  if (!at) return null;
+  if (at.getTime() > now.getTime() + 10 * 60_000 || at.getTime() < now.getTime() - 7 * 86_400_000) throw new HttpError(400, 'AT_OUT_OF_RANGE');
+  return at;
+}
 
 /** multipart 欄位皆為字串，先轉型再套用同一套規則。 */
 const PhotoFieldsSchema = z.object({
@@ -79,6 +88,8 @@ const PhotoFieldsSchema = z.object({
   nextHours: z.coerce.number().min(1).max(168).optional(),
   takenAt: isoDate.optional(),
   clientAt: isoDate.optional(),
+  /** '1' / 'true'：以 takenAt 當打卡時間 */
+  useTakenAt: z.string().optional(),
 });
 
 const CreateTripSchema = z
@@ -202,6 +213,7 @@ async function jsonCheckin(trip: ActiveTripSnap, body: unknown) {
     note: input.note,
     nextHours: input.nextHours ?? null,
     clientAt: input.clientAt ?? null,
+    at: checkBackdate(input.at),
   });
   return { ok: true as const, nextDeadlineAt: result.nextDeadlineAt.toISOString(), tz: result.tz, pushed: result.pushed, recovered: result.recovered };
 }
@@ -228,6 +240,7 @@ async function photoCheckin(req: Request, trip: ActiveTripSnap) {
     clientAt: f.clientAt ?? null,
     photoId,
     takenAt: f.takenAt ?? null,
+    at: f.useTakenAt === '1' || f.useTakenAt === 'true' ? checkBackdate(f.takenAt ?? null) : null,
   });
   return { ok: true as const, photoId, nextDeadlineAt: result.nextDeadlineAt.toISOString(), tz: result.tz, pushed: result.pushed, recovered: result.recovered };
 }

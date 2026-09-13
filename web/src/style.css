@@ -187,3 +187,4 @@ label.inline input { width: auto; margin: 0; }
 .fc-summary { margin: 8px 0 0; padding-left: 18px; font-size: 14px; }
 .fc-summary li { margin: 2px 0; }
 .fc-card { padding-bottom: 10px; }
+label.inline.small { font-size: 13px; color: var(--muted); margin: 6px 0 2px; }

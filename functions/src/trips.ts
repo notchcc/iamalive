@@ -164,6 +164,8 @@ export interface CheckinInput {
   clientAt: Date | null;
   photoId?: string | null;
   takenAt?: Date | null;
+  /** 以此時間當打卡時間（例如照片拍攝時間）；必須在過去。省略則為現在。 */
+  at?: Date | null;
 }
 
 export interface CheckinResult {
@@ -176,12 +178,19 @@ export interface CheckinResult {
 export async function recordCheckin(snap: TripSnap, input: CheckinInput): Promise<CheckinResult> {
   const trip = snap.data();
   const now = new Date();
+  // 回填時間只接受過去；照片較舊時打卡時間 = 拍攝時間
+  const at = input.at && input.at.getTime() < now.getTime() ? input.at : now;
+  const prevLast = trip.lastCheckinAt ? trip.lastCheckinAt.toDate() : null;
+  // 比目前最後一筆還舊的回填：只補進歷史，不動最後位置、期限與警報狀態
+  const isNewest = !prevLast || at.getTime() > prevLast.getTime();
   const tz = tzFor(input.lat, input.lng);
   const place = await reverseGeocode(input.lat, input.lng);
   const hours = input.nextHours ?? trip.intervalHours;
   // 行程開始前的打卡：期限從開始時間起算，避免出發前就觸發警報。
-  const base = trip.startAt.toDate() > now ? trip.startAt.toDate() : now;
-  const nextDeadlineAt = new Date(base.getTime() + hours * HOUR_MS);
+  const base = trip.startAt.toDate() > at ? trip.startAt.toDate() : at;
+  let nextDeadlineAt = new Date(base.getTime() + hours * HOUR_MS);
+  // 回填的照片太舊、算出的期限已過：上傳本身證明現在平安，期限改從現在起算
+  if (nextDeadlineAt.getTime() < now.getTime()) nextDeadlineAt = new Date(now.getTime() + hours * HOUR_MS);
 
   const checkin: Checkin = {
     geo: new GeoPoint(input.lat, input.lng),
@@ -193,28 +202,33 @@ export async function recordCheckin(snap: TripSnap, input: CheckinInput): Promis
     nextHours: input.nextHours,
     photoId: input.photoId ?? null,
     takenAt: input.takenAt ? Timestamp.fromDate(input.takenAt) : null,
-    createdAt: Timestamp.fromDate(now),
+    createdAt: Timestamp.fromDate(at),
     clientAt: input.clientAt ? Timestamp.fromDate(input.clientAt) : null,
   };
 
-  const patch: Partial<Trip> = {
-    lastCheckinAt: checkin.createdAt,
-    lastCheckinGeo: checkin.geo,
-    lastCheckinPlace: place,
-    travelerTz: tz,
-    nextDeadlineAt: Timestamp.fromDate(nextDeadlineAt),
-    offlineUntil: null,
-    alerted: false,
-    alertCount: 0,
-    morningResendDue: false,
-    morningResent: false,
-    updatedAt: checkin.createdAt,
-  };
+  const patch: Partial<Trip> = isNewest
+    ? {
+        lastCheckinAt: checkin.createdAt,
+        lastCheckinGeo: checkin.geo,
+        lastCheckinPlace: place,
+        travelerTz: tz,
+        nextDeadlineAt: Timestamp.fromDate(nextDeadlineAt),
+        offlineUntil: null,
+        alerted: false,
+        alertCount: 0,
+        morningResendDue: false,
+        morningResent: false,
+        updatedAt: Timestamp.fromDate(now),
+      }
+    : { updatedAt: Timestamp.fromDate(now) };
+  if (!isNewest) nextDeadlineAt = trip.nextDeadlineAt.toDate();
   const updated: Trip = { ...trip, ...patch };
 
   const prior = await loadRecent(snap.id, RECENT_LIMIT - 1);
   const checkinRef = checkinsCol(snap.id).doc();
-  const recent = [...recentFromCheckins([{ id: checkinRef.id, data: checkin }]), ...prior];
+  const recent = [...recentFromCheckins([{ id: checkinRef.id, data: checkin }]), ...prior]
+    .sort((a, b) => b.at.toMillis() - a.at.toMillis())
+    .slice(0, RECENT_LIMIT);
 
   const batch = db.batch();
   batch.set(checkinRef, checkin);
@@ -223,7 +237,7 @@ export async function recordCheckin(snap: TripSnap, input: CheckinInput): Promis
   await batch.commit();
 
   let pushed = false;
-  const recovered = trip.alerted;
+  const recovered = isNewest && trip.alerted;
   if (recovered) {
     pushed = await pushGroup(
       trip.ownerUid,

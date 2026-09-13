@@ -17,6 +17,7 @@ function esc(s: string): string {
 const ERR: Record<string, string> = {
   TRIP_NOT_FOUND: '連結無效，請到管理頁重新取得打卡頁連結',
   TRIP_ENDED: '這趟行程已結束',
+  AT_OUT_OF_RANGE: '拍攝時間不在過去 7 天內，無法作為打卡時間',
   VALIDATION: '欄位格式錯誤',
   PHOTO_REQUIRED: '沒有收到照片',
   UNSUPPORTED_IMAGE_TYPE: '不支援的圖片格式',
@@ -55,6 +56,7 @@ export function renderCheckinPage(root: HTMLElement, token: string): () => void 
           <img id="cp-img" alt="" />
           <div class="info">
             <div id="cp-meta"></div>
+            <label class="inline small" id="cp-use-taken-wrap" hidden><input type="checkbox" id="cp-use-taken" /> 以拍攝時間 <span id="cp-taken-label"></span> 為打卡時間</label>
             <div class="row">
               <button id="cp-photo-submit" type="button" disabled>上傳並打卡</button>
               <button id="cp-photo-gps" type="button" class="secondary">改用目前定位</button>
@@ -78,6 +80,9 @@ export function renderCheckinPage(root: HTMLElement, token: string): () => void 
   const img = root.querySelector<HTMLImageElement>('#cp-img')!;
   const metaEl = root.querySelector<HTMLElement>('#cp-meta')!;
   const photoSubmit = root.querySelector<HTMLButtonElement>('#cp-photo-submit')!;
+  const useTakenWrap = root.querySelector<HTMLElement>('#cp-use-taken-wrap')!;
+  const useTaken = root.querySelector<HTMLInputElement>('#cp-use-taken')!;
+  const takenLabel = root.querySelector<HTMLElement>('#cp-taken-label')!;
   const photoGps = root.querySelector<HTMLButtonElement>('#cp-photo-gps')!;
 
   const setBusy = (busy: boolean): void => {
@@ -137,6 +142,8 @@ export function renderCheckinPage(root: HTMLElement, token: string): () => void 
     photoSubmit.textContent = '上傳並打卡';
     preview.hidden = true;
     photoState = null;
+    useTaken.checked = false;
+    useTakenWrap.hidden = true;
     cameraIn.value = '';
     fileIn.value = '';
   };
@@ -187,6 +194,12 @@ export function renderCheckinPage(root: HTMLElement, token: string): () => void 
     const taken = p.takenAt && info ? `拍攝於 ${fmtBoth(p.takenAt, info.travelerTz)}` : '無拍攝時間';
     metaEl.innerHTML = `<div>${loc}</div><div class="muted">${esc(taken)} · ${esc(fmtBytes(p.file.size))}</div>`;
     photoSubmit.disabled = !(p.lat != null && p.lng != null);
+    // 拍攝時間在過去 7 天內、且不是剛拍的（差 2 分鐘以上）才提供「以拍攝時間為打卡時間」
+    const ageMs = p.takenAt ? Date.now() - p.takenAt.getTime() : -1;
+    const offer = p.takenAt != null && ageMs > 2 * 60_000 && ageMs < 7 * 86_400_000;
+    useTakenWrap.hidden = !offer;
+    if (offer && info) takenLabel.textContent = fmtBoth(p.takenAt!, info.travelerTz);
+    if (!offer) useTaken.checked = false;
   };
 
   const fillFromGps = (): void => {
@@ -245,10 +258,12 @@ export function renderCheckinPage(root: HTMLElement, token: string): () => void 
       if (x.note) fd.append('note', x.note);
       if (x.nextHours) fd.append('nextHours', String(x.nextHours));
       if (photoState.takenAt) fd.append('takenAt', photoState.takenAt.toISOString());
+      const backdate = useTaken.checked && !useTakenWrap.hidden && photoState.takenAt;
+      if (backdate) fd.append('useTakenAt', '1');
       fd.append('clientAt', x.clientAt);
       fd.append('photo', blob, type === 'image/jpeg' ? 'photo.jpg' : photoState.file.name || 'photo');
       const r = await api.checkinPage.photo(token, fd);
-      afterCheckin(r.nextDeadlineAt, r.tz, '已用照片打卡');
+      afterCheckin(r.nextDeadlineAt, r.tz, backdate ? `已用照片打卡（打卡時間 ${fmtBoth(photoState.takenAt!, r.tz)}）` : '已用照片打卡');
     } catch (e) {
       toast(errText(e), 'err');
     } finally {
