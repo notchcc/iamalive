@@ -8,6 +8,10 @@ import { fmtAgo, fmtBoth } from './time';
 import type { CheckinPageJson } from './types';
 import { renderShareBar } from './share';
 import { renderForecast } from './forecast';
+import L from 'leaflet';
+import { Timestamp } from 'firebase/firestore';
+import { TrackLayer, createMap } from './mapview';
+import type { CheckinJson, RecentItem } from './types';
 import { applyPwaIdentity } from './pwa';
 
 function esc(s: string): string {
@@ -66,6 +70,11 @@ export function renderCheckinPage(root: HTMLElement, token: string): () => void 
       </section>
       <div id="share"></div>
       <section class="card fc-card"><h2>接下來 24 小時 <span class="muted">假設不再打卡</span></h2><div id="cp-forecast" class="forecast"></div></section>
+      <section class="card map-card">
+        <h2>位置 <span class="muted">藍點為目前位置，其餘為最近 5 次打卡</span></h2>
+        <div id="cp-map" class="map small"></div>
+        <p id="cp-map-note" class="muted small"></p>
+      </section>
       <footer class="foot"><small>此頁不需登入，持有連結者即可替這趟行程打卡，請勿轉傳。<br><button id="cp-refresh" class="link" type="button">重新整理</button></small></footer>
     </div>`;
 
@@ -83,6 +92,60 @@ export function renderCheckinPage(root: HTMLElement, token: string): () => void 
   const useTakenWrap = root.querySelector<HTMLElement>('#cp-use-taken-wrap')!;
   const useTaken = root.querySelector<HTMLInputElement>('#cp-use-taken')!;
   const takenLabel = root.querySelector<HTMLElement>('#cp-taken-label')!;
+
+  // ---- 地圖：最近 5 次打卡 + 目前位置 ----
+  const map = createMap(root.querySelector<HTMLElement>('#cp-map')!);
+  const track = new TrackLayer(map);
+  const mapNote = root.querySelector<HTMLElement>('#cp-map-note')!;
+  let hereLayer: L.LayerGroup | null = null;
+  let here: { lat: number; lng: number; acc: number | null } | null = null;
+  let recentItems: RecentItem[] = [];
+  const toRecentItem = (j: CheckinJson): RecentItem => ({
+    id: j.id,
+    lat: j.lat,
+    lng: j.lng,
+    acc: j.acc,
+    src: j.src,
+    tz: j.tz,
+    place: j.place,
+    note: j.note,
+    photoId: null, // 打卡頁沒有家人頁 token，不顯示照片
+    takenAt: j.takenAt ? Timestamp.fromDate(new Date(j.takenAt)) : null,
+    at: Timestamp.fromDate(new Date(j.at)),
+  });
+  const fitMap = (): void => {
+    const pts: L.LatLngExpression[] = recentItems.map((r) => [r.lat, r.lng] as L.LatLngExpression);
+    if (here) pts.push([here.lat, here.lng]);
+    if (!pts.length) return;
+    if (pts.length === 1) map.setView(pts[0], 14);
+    else map.fitBounds(L.latLngBounds(pts).pad(0.2), { maxZoom: 15 });
+  };
+  const drawHere = (): void => {
+    hereLayer?.remove();
+    hereLayer = null;
+    if (!here) return;
+    hereLayer = L.layerGroup().addTo(map);
+    if (here.acc && here.acc > 0) L.circle([here.lat, here.lng], { radius: here.acc, color: '#1d4ed8', weight: 1, fillOpacity: 0.08 }).addTo(hereLayer);
+    L.circleMarker([here.lat, here.lng], { radius: 8, color: '#fff', weight: 3, fillColor: '#2563eb', fillOpacity: 1 }).bindPopup('目前位置').addTo(hereLayer);
+    mapNote.textContent = `目前位置 ${here.lat.toFixed(4)}, ${here.lng.toFixed(4)}${here.acc ? ` ±${Math.round(here.acc)} m` : ''}`;
+  };
+  const setHere = (pos: GeolocationPosition): void => {
+    here = { lat: pos.coords.latitude, lng: pos.coords.longitude, acc: pos.coords.accuracy };
+    drawHere();
+    fitMap();
+  };
+  const drawRecent = (items: CheckinJson[]): void => {
+    recentItems = items.slice(0, 5).map(toRecentItem);
+    track.render(recentItems, { fit: false });
+    fitMap();
+    window.setTimeout(() => map.invalidateSize(), 50);
+  };
+  const locateForMap = (): void => {
+    if (!navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(setHere, () => {
+      if (!here) mapNote.textContent = '尚未取得目前位置（允許定位後會顯示）';
+    }, { enableHighAccuracy: false, timeout: 8_000, maximumAge: 120_000 });
+  };
   const photoGps = root.querySelector<HTMLButtonElement>('#cp-photo-gps')!;
 
   const setBusy = (busy: boolean): void => {
@@ -119,6 +182,8 @@ export function renderCheckinPage(root: HTMLElement, token: string): () => void 
       applyPwaIdentity('checkin', info.title);
       renderStatus();
       setBusy(info.status !== 'active');
+      drawRecent(info.recent ?? []);
+      locateForMap();
       void api.checkinPage
         .forecast(token)
         .then((f) => renderForecast(root.querySelector<HTMLElement>('#cp-forecast')!, f))
@@ -162,6 +227,7 @@ export function renderCheckinPage(root: HTMLElement, token: string): () => void 
     gpsBtn.querySelector('.lbl')!.textContent = '定位中…';
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
+        setHere(pos);
         try {
           const r = await api.checkinPage.checkin(token, {
             lat: pos.coords.latitude,
@@ -283,5 +349,6 @@ export function renderCheckinPage(root: HTMLElement, token: string): () => void 
   return () => {
     document.removeEventListener('visibilitychange', onVisible);
     if (timer) window.clearInterval(timer);
+    map.remove();
   };
 }

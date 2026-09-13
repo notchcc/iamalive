@@ -508,7 +508,20 @@ export function createApp(): express.Express {
     wrap(async (req, res) => {
       res.setHeader('Cache-Control', 'no-store');
       const snap = await requireTripByCheckinToken(req.params.token);
-      res.json(checkinPageJson(snap.data()));
+      const recent = (await recentForTrip(snap.id, 5)).map((it) => ({
+        id: it.id,
+        lat: it.lat,
+        lng: it.lng,
+        acc: it.acc,
+        src: it.src,
+        tz: it.tz,
+        place: it.place ?? null,
+        note: it.note,
+        photoId: it.photoId ?? null,
+        takenAt: it.takenAt ? it.takenAt.toDate().toISOString() : null,
+        at: it.at.toDate().toISOString(),
+      }));
+      res.json({ ...checkinPageJson(snap.data()), recent });
     }),
   );
   r.get(

@@ -352,6 +352,7 @@ async function main() {
   assert.equal(pj.title, trip.title);
   assert.equal(pj.checkinToken, undefined, 'public json must not leak tokens');
   assert.equal(pj.familyUrl, undefined);
+  assert.ok(Array.isArray(pj.recent) && pj.recent.length >= 1 && pj.recent.length <= 5 && typeof pj.recent[0].lat === 'number', 'recent 5 for the map');
   pub = await fetch(`${BASE}/c/${trip.checkinToken}/forecast`);
   assert.equal(pub.status, 200);
   assert.ok((await pub.json()).summary.length >= 1, 'public forecast');

@@ -258,7 +258,7 @@ service cloud.firestore {
 | PATCH | `/api/trips/:id` | 行程中更改 `intervalHours`（1–72）；期限立即重算為 max(最後打卡, 開始) + 新間隔（已過則現在 + 新間隔；離線中則離線結束 + 新間隔），警報與提醒旗標歸零，不推群組 | `/me` 行程管理、LINE 指令「頻率 N」 |
 | POST | `/api/trips/:id/offline` | 預告離線 | `{ hours }` → `offlineUntil`、`nextDeadlineAt = offlineUntil + interval`，推「將離線至 T」 |
 | POST | `/api/checkin/photo` | 照片打卡 | `multipart/form-data`：`photo`（檔案，≤ 8 MB，jpeg/png/heic/webp）+ `lat`、`lng`、`accuracy?`、`note?`、`nextHours?`、`takenAt?`、`clientAt?`；存入 GCS 後走與 `/checkin` 相同流程，`source = photo` |
-| GET | `/api/c/:token` | 打卡頁摘要 | **不需登入**；以 `checkinToken` 找行程，回 title / 間隔 / 最後回報 / 期限 / 離線，不含任何 token 或連結；找不到 404、已結案 410 |
+| GET | `/api/c/:token` | 打卡頁摘要 | **不需登入**；以 `checkinToken` 找行程，回 title / 間隔 / 最後回報 / 期限 / 離線 + `recent`（最近 5 筆，供地圖），不含任何 token 或連結；找不到 404、已結案 410 |
 | POST | `/api/c/:token/checkin` | 打卡頁 JSON 打卡 | 同 `/api/checkin` 的 body 與回應 |
 | POST | `/api/c/:token/checkin/photo` | 打卡頁照片打卡 | 同 `/api/checkin/photo` |
 | POST | `/api/trips/:id/checkin-token/rotate` | 輪替打卡頁 token | 舊連結立即 404 |
@@ -404,6 +404,7 @@ reply 免費，不計額度。非旅行者傳的位置訊息忽略。
 
 - 每趟行程建立時產生 `checkinToken`（與 readToken 同格式，22 字元 URL-safe）；舊行程在 `/status` 讀取時補上。
 - 頁面：狀態卡（最後回報多久前、地點、下次期限、離線）、備註與下次回報欄、三個大按鈕「定位打卡 / 拍照打卡 / 選擇照片」。從圖庫選的照片若拍攝時間在過去 7 天內且非剛拍，會出現「以拍攝時間為打卡時間」勾選（預設不勾）。拍照走 `capture=environment`，沒有 GPS 時自動改用目前定位。頁面可見（切回前景）時自動重新整理，30 秒更新「多久前」。
+- 「位置」卡片（本頁連結上方）：Leaflet 地圖，畫最近 5 次打卡（同家人頁樣式，無照片）與目前位置（藍點 + 精度圈，進頁面時低精度定位、按定位打卡時更新），自動框定。
 - 頁面底部「本頁連結」列（家人頁同樣有）：顯示網址、複製、開啟；LIFF 內「開啟」以 `liff.openWindow({external:true})` 交給 Safari，才能加到主畫面。
 - 加到主畫面的身分依頁面切換（`pwa.ts` 於載入時替換 `<link rel=manifest>`、`apple-touch-icon`、`apple-mobile-web-app-title`、`theme-color`）：打卡頁為青綠圖釘、名稱「打卡」（`manifest-checkin.webmanifest`）；家人頁為琥珀色房子加愛心、名稱「家人頁」（`manifest-family.webmanifest`）；管理頁用預設。manifest 皆 `display: standalone`、不設 `start_url`（iOS 以加入時的網址為起點）。
 - 安全性：token 即能力，持有者只能看該行程摘要與打卡，不能改行程、看不到家人連結與照片；`/c/**` 加 `Referrer-Policy: same-origin` 與 `no-store`；外洩時在 `/me` 輪替。

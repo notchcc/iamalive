@@ -140,6 +140,8 @@ export interface CheckinPageJson {
   deadlineShift: DeadlineShift;
   offlineUntil: string | null;
   alerted: boolean;
+  /** 最近 5 筆打卡（給打卡頁地圖） */
+  recent: CheckinJson[];
 }
 
 export interface UserJson {

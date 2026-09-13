@@ -188,3 +188,4 @@ label.inline input { width: auto; margin: 0; }
 .fc-summary li { margin: 2px 0; }
 .fc-card { padding-bottom: 10px; }
 label.inline.small { font-size: 13px; color: var(--muted); margin: 6px 0 2px; }
+.map-card .map.small { margin-top: 4px; }
