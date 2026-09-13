@@ -559,6 +559,8 @@ async function main() {
   assert.equal(r.status, 400);
   log('flight lookup (stub) ok');
 
+  // 航段測試用固定日期（2026-09-10）；行程開始日必須早於它，否則「開始前不警報」會吃掉警報
+  await tripRef.update({ startAt: Timestamp.fromDate(new Date('2026-09-01T00:00:00Z')) });
   const dep = new Date('2026-09-10T04:00:00Z');
   const arr = new Date('2026-09-10T16:00:00Z');
   await tripRef.update({ alerted: false, alertCount: 0, lastAlertAt: null, morningResendDue: false, morningResent: false, offlineUntil: null,
