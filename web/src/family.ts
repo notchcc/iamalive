@@ -3,7 +3,7 @@
  */
 import { Timestamp, doc, onSnapshot } from 'firebase/firestore';
 import { firestore } from './firebase';
-import { currentFlight, effectiveDeadline, nextFlight, toWindows } from './flights';
+import { currentFlight, effectiveDeadline, toWindows } from './flights';
 import { TrackLayer, createMap, placeText, renderTimeline, type TimelineOpts } from './mapview';
 import { renderShareBar } from './share';
 import { applyPwaIdentity } from './pwa';
@@ -134,7 +134,7 @@ export function renderFamilyPage(root: HTMLElement, token: string, tlOpts: Timel
     const last = view.lastCheckinAt ? view.lastCheckinAt.toDate() : null;
     const wins = toWindows(view.flights);
     const deadline = view.effectiveDeadlineAt ? view.effectiveDeadlineAt.toDate() : effectiveDeadline(view.nextDeadlineAt.toDate(), wins);
-    const sleeping = view.deadlineShift === 'sleep';
+    const shiftNote = view.deadlineShift === 'sleep' ? '（睡眠時段順延）' : view.deadlineShift === 'flight' ? '（航段順延）' : '';
     const offlineUntil = view.offlineUntil ? view.offlineUntil.toDate() : null;
     const inFlight = view.status === 'active' ? currentFlight(wins, now) : null;
     const overdue = view.status === 'active' && deadline < now && !(offlineUntil && offlineUntil > now) && !inFlight;
@@ -154,7 +154,7 @@ export function renderFamilyPage(root: HTMLElement, token: string, tlOpts: Timel
     } else if (!last) {
       cls = overdue ? 'bad' : 'idle';
       head = '尚未回報';
-      sub = overdue ? `已超過首次期限 ${fmtHours((now.getTime() - deadline.getTime()) / 3.6e6)}` : `首次期限 ${fmtBoth(deadline, view.travelerTz)}`;
+      sub = overdue ? `已超過首次期限 ${fmtHours((now.getTime() - deadline.getTime()) / 3.6e6)}` : `首次期限 ${fmtBoth(deadline, view.travelerTz)}${shiftNote}`;
     } else if (offlineUntil && offlineUntil > now) {
       cls = 'offline';
       head = `最後回報：${fmtAgo(last, now)}`;
@@ -166,21 +166,19 @@ export function renderFamilyPage(root: HTMLElement, token: string, tlOpts: Timel
     } else {
       cls = 'ok';
       head = `最後回報：${fmtAgo(last, now)}`;
-      sub = sleeping ? `😴 睡眠時段，期限順延至 ${fmtBoth(deadline, view.travelerTz)}` : `下次期限 ${fmtBoth(deadline, view.travelerTz)}`;
+      sub = `下次期限 ${fmtBoth(deadline, view.travelerTz)}${shiftNote}`;
     }
 
     const lastLine = last
       ? `<div class="last">${lastItem ? `📍 ${esc(placeText(lastItem))} · ` : ''}${esc(fmtBoth(last, lastItem?.tz ?? view.travelerTz))}${lastItem?.note ? ` · 「${esc(lastItem.note)}」` : ''}</div>`
       : '';
-    const nf = !inFlight && view.status === 'active' ? nextFlight(wins, now) : null;
-    const nextLine = nf ? `<div class="sub muted">下一段 ${esc(nf.flightNo)} ${esc(nf.fromCity)} → ${esc(nf.toCity)}，${esc(fmtBoth(nf.departAt, nf.fromTz))} 起飛</div>` : '';
 
     statusEl.className = `status ${cls}`;
     statusEl.innerHTML = `
       <div class="trip-title">${esc(view.title)} <span class="muted">每 ${view.intervalHours} 小時回報</span></div>
       <div class="head">${esc(head)}</div>
       ${lastLine}
-      <div class="sub">${esc(sub)}</div>${nextLine}`;
+      <div class="sub">${esc(sub)}</div>`;
   };
 
   const renderFlights = (): void => {
