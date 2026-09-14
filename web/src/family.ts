@@ -295,7 +295,7 @@ export function renderFamilyPage(root: HTMLElement, token: string, tlOpts: Timel
     galleryExhausted = false;
     galleryEl.innerHTML = `
       <div class="slides" id="slides">${head.map(slideHtml).join('')}</div>
-      <div class="gallery-bar"><span class="counter" id="gallery-counter"></span></div>`;
+      <span class="counter" id="gallery-counter"></span>`;
     renderCounter();
     const slides = galleryEl.querySelector<HTMLElement>('#slides')!;
     slides.addEventListener(
