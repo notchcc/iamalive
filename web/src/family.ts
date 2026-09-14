@@ -24,7 +24,8 @@ export function renderFamilyPage(root: HTMLElement, token: string, tlOpts: Timel
       <div id="share"></div>
       <header class="clocks" id="clocks"></header>
       <section class="status" id="status"><p class="muted">載入中…</p></section>
-      <section class="flights" id="flights" hidden></section>
+      <section class="gallery" id="gallery" hidden></section>
+      <details class="flights" id="flights" hidden><summary><span class="ttl">航段</span><span class="muted" id="flights-sum"></span></summary><div id="flights-body"></div></details>
       <section class="map-wrap"><div id="map" class="map"></div></section>
       <section class="timeline"><h2>時間軸</h2><ul id="timeline"></ul><div id="tl-more" class="tl-more"></div></section>
       <footer class="foot"><small>此頁僅供持有連結者查看。位置由旅行者主動回報，非即時追蹤。</small></footer>
@@ -33,6 +34,9 @@ export function renderFamilyPage(root: HTMLElement, token: string, tlOpts: Timel
   const clocksEl = root.querySelector<HTMLElement>('#clocks')!;
   const statusEl = root.querySelector<HTMLElement>('#status')!;
   const flightsEl = root.querySelector<HTMLElement>('#flights')!;
+  const flightsBody = root.querySelector<HTMLElement>('#flights-body')!;
+  const flightsSum = root.querySelector<HTMLElement>('#flights-sum')!;
+  const galleryEl = root.querySelector<HTMLElement>('#gallery')!;
   const timelineEl = root.querySelector<HTMLElement>('#timeline')!;
   applyPwaIdentity('family');
   renderShareBar(root.querySelector<HTMLElement>('#share')!, `${location.origin}/w/${token}`, '把這條連結傳給家人即可查看；在 LINE 內按「開啟」會用瀏覽器開啟。', { collapsed: true });
@@ -190,8 +194,15 @@ export function renderFamilyPage(root: HTMLElement, token: string, tlOpts: Timel
     }
     const now = new Date();
     flightsEl.hidden = false;
-    flightsEl.innerHTML =
-      '<h2>航段</h2><ul>' +
+    const nowF = currentFlight(wins, now);
+    const upcoming = wins.filter((f) => f.departAt > now).sort((a, b) => a.departAt.getTime() - b.departAt.getTime())[0];
+    flightsSum.textContent = nowF
+      ? `${wins.length} 段 · 飛行中 ${nowF.flightNo}`
+      : upcoming
+        ? `${wins.length} 段 · 下一段 ${upcoming.flightNo} ${fmtDateTime(upcoming.departAt, upcoming.fromTz)}`
+        : `${wins.length} 段 · 全部已降落`;
+    flightsBody.innerHTML =
+      '<ul>' +
       wins
         .map((f) => {
           const state = now > f.arriveAt ? 'done' : currentFlight([f], now) ? 'now' : 'todo';
@@ -204,10 +215,76 @@ export function renderFamilyPage(root: HTMLElement, token: string, tlOpts: Timel
       '</ul><p class="muted small">時間為各地當地時間；飛行中不會發出警報，落地後 3 小時內需回報。</p>';
   };
 
+  // ---- 最近照片幻燈片（scroll-snap，自動輪播，使用者滑動後暫停 10 秒） ----
+  let galleryKey = '';
+  let galleryIdx = 0;
+  let galleryPausedUntil = 0;
+  const renderGallery = (): void => {
+    if (!view) return;
+    const photos = view.recent.filter((r) => r.photoId).slice(0, 10);
+    const key = photos.map((p) => p.photoId).join(',');
+    if (!photos.length) {
+      galleryEl.hidden = true;
+      galleryKey = '';
+      return;
+    }
+    galleryEl.hidden = false;
+    if (key === galleryKey) return;
+    galleryKey = key;
+    galleryIdx = 0;
+    galleryEl.innerHTML = `
+      <div class="slides" id="slides">${photos
+        .map((p, i) => {
+          const at = p.at.toDate();
+          const url = photoUrl(p.photoId!);
+          return `<figure class="slide" data-i="${i}">
+            <a href="${url}" target="_blank" rel="noopener"><img src="${url}" alt="" loading="${i < 2 ? 'eager' : 'lazy'}" /></a>
+            <figcaption><span>${p.place ? esc(placeText(p)) : ''}</span><span class="when">${esc(fmtBoth(at, p.tz))}</span>${p.note ? `<span class="note">「${esc(p.note)}」</span>` : ''}</figcaption>
+          </figure>`;
+        })
+        .join('')}</div>
+      ${photos.length > 1 ? `<div class="dots">${photos.map((_, i) => `<i data-dot="${i}"${i === 0 ? ' class="on"' : ''}></i>`).join('')}</div>` : ''}`;
+    const slides = galleryEl.querySelector<HTMLElement>('#slides')!;
+    const dots = [...galleryEl.querySelectorAll<HTMLElement>('[data-dot]')];
+    const setDot = (i: number): void => dots.forEach((d, j) => d.classList.toggle('on', i === j));
+    slides.addEventListener(
+      'scroll',
+      () => {
+        galleryPausedUntil = Date.now() + 10_000;
+        const i = Math.round(slides.scrollLeft / slides.clientWidth);
+        if (i !== galleryIdx) {
+          galleryIdx = i;
+          setDot(i);
+        }
+      },
+      { passive: true },
+    );
+    dots.forEach((d) =>
+      d.addEventListener('click', () => {
+        const i = Number(d.dataset.dot);
+        slides.scrollTo({ left: i * slides.clientWidth, behavior: 'smooth' });
+      }),
+    );
+  };
+  const galleryTimer = window.setInterval(() => {
+    const slides = galleryEl.querySelector<HTMLElement>('#slides');
+    if (!slides || galleryEl.hidden || document.visibilityState !== 'visible' || Date.now() < galleryPausedUntil) return;
+    const n = slides.children.length;
+    if (n < 2) return;
+    const next = (galleryIdx + 1) % n;
+    galleryPausedUntil = 0;
+    slides.scrollTo({ left: next * slides.clientWidth, behavior: 'smooth' });
+    galleryIdx = next;
+    galleryEl.querySelectorAll<HTMLElement>('[data-dot]').forEach((d, j) => d.classList.toggle('on', j === next));
+    // 自動輪播觸發的 scroll 事件不該算成使用者操作
+    window.setTimeout(() => (galleryPausedUntil = 0), 800);
+  }, 5000);
+
   const renderAll = (): void => {
     if (!view) return;
     renderClocks();
     renderStatus();
+    renderGallery();
     renderFlights();
     renderTl();
     applyPwaIdentity('family', view.title);
@@ -243,6 +320,7 @@ export function renderFamilyPage(root: HTMLElement, token: string, tlOpts: Timel
 
   return () => {
     io.disconnect();
+    window.clearInterval(galleryTimer);
     window.clearInterval(clockTimer);
     window.clearInterval(agoTimer);
     unsub();

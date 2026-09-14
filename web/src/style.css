@@ -189,3 +189,31 @@ label.inline input { width: auto; margin: 0; }
 .fc-card { padding-bottom: 10px; }
 label.inline.small { font-size: 13px; color: var(--muted); margin: 6px 0 2px; }
 .map-card .map.small { margin-top: 4px; }
+
+/* 家人頁：美化 */
+.family .card, .family .status, .family .clock, .family .flights, .family .tl-item { box-shadow: 0 1px 2px rgba(17, 24, 39, 0.04), 0 4px 14px rgba(17, 24, 39, 0.04); }
+.family .status .head { letter-spacing: 0.2px; }
+.family .timeline h2 { font-size: 15px; color: var(--muted); font-weight: 600; margin: 14px 0 8px; }
+
+/* 航段：可折疊，預設收合 */
+details.flights summary { list-style: none; cursor: pointer; display: flex; align-items: baseline; gap: 10px; }
+details.flights summary::-webkit-details-marker { display: none; }
+details.flights summary .ttl { font-size: 17px; font-weight: 700; }
+details.flights summary .muted { flex: 1; font-size: 13px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+details.flights summary::after { content: '▾'; color: var(--muted); }
+details.flights[open] summary::after { content: '▴'; }
+details.flights[open] summary { margin-bottom: 8px; }
+
+/* 最近照片幻燈片 */
+.gallery { margin-bottom: 10px; }
+.gallery .slides { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; gap: 0; border-radius: 14px; scrollbar-width: none; background: #111827; }
+.gallery .slides::-webkit-scrollbar { display: none; }
+.gallery .slide { flex: 0 0 100%; scroll-snap-align: start; margin: 0; position: relative; aspect-ratio: 4 / 3; max-height: 56vh; overflow: hidden; }
+.gallery .slide a { display: block; width: 100%; height: 100%; }
+.gallery .slide img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.gallery figcaption { position: absolute; left: 0; right: 0; bottom: 0; padding: 26px 12px 10px; background: linear-gradient(to top, rgba(0,0,0,0.65), rgba(0,0,0,0)); color: #fff; font-size: 13px; display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+.gallery figcaption .when { opacity: 0.85; font-variant-numeric: tabular-nums; }
+.gallery figcaption .note { flex-basis: 100%; opacity: 0.95; }
+.gallery .dots { display: flex; justify-content: center; gap: 6px; padding: 8px 0 0; }
+.gallery .dots i { width: 6px; height: 6px; border-radius: 50%; background: #d1d5db; cursor: pointer; transition: transform 0.2s, background 0.2s; }
+.gallery .dots i.on { background: var(--brand); transform: scale(1.35); }
