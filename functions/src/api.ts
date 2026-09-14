@@ -412,8 +412,42 @@ export function createApp(): express.Express {
       const view = await viewsCol.doc(token).get();
       const tripId = view.data()?.tripId;
       if (!tripId) throw new HttpError(404, 'NOT_FOUND');
-      const q = z.object({ before: isoDate.optional(), limit: z.coerce.number().int().min(1).max(50).default(10) }).parse(req.query);
+      const q = z.object({ before: isoDate.optional(), limit: z.coerce.number().int().min(1).max(50).default(10), photos: z.enum(['1']).optional() }).parse(req.query);
       res.setHeader('Cache-Control', 'no-store');
+      const toJson = (it: import('./types.js').RecentItem) => ({
+        id: it.id,
+        lat: it.lat,
+        lng: it.lng,
+        acc: it.acc,
+        src: it.src,
+        tz: it.tz,
+        place: it.place ?? null,
+        note: it.note,
+        photoId: it.photoId ?? null,
+        takenAt: it.takenAt ? it.takenAt.toDate().toISOString() : null,
+        at: it.at.toDate().toISOString(),
+      });
+      if (q.photos) {
+        // 只要有照片的：最多掃 10 頁 × 25 筆，湊滿 limit 或掃完為止；回傳掃描游標讓前端續抓
+        const out: import('./types.js').RecentItem[] = [];
+        let cursor: Date | null = q.before ? new Date(q.before) : null;
+        let exhausted = false;
+        for (let i = 0; i < 10 && out.length < q.limit; i++) {
+          const page = await checkinsPage(tripId, cursor, 25);
+          if (!page.length) {
+            exhausted = true;
+            break;
+          }
+          for (const it of page) if (it.photoId && out.length < q.limit) out.push(it);
+          cursor = page[page.length - 1].at.toDate();
+          if (page.length < 25) {
+            exhausted = true;
+            break;
+          }
+        }
+        res.json({ items: out.map(toJson), cursor: cursor ? cursor.toISOString() : null, exhausted });
+        return;
+      }
       const items = await checkinsPage(tripId, q.before ? new Date(q.before) : null, q.limit);
       res.json(
         items.map((it) => ({

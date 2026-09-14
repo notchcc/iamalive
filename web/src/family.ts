@@ -215,38 +215,89 @@ export function renderFamilyPage(root: HTMLElement, token: string, tlOpts: Timel
       '</ul><p class="muted small">時間為各地當地時間；飛行中不會發出警報，落地後 3 小時內需回報。</p>';
   };
 
-  // ---- 最近照片幻燈片（scroll-snap，自動輪播，使用者滑動後暫停 10 秒） ----
+  // ---- 最近照片幻燈片：先放 recent 前 10 張，往右滑到尾端再補（先用 recent 其餘，再向 API 續抓） ----
+  const GALLERY_PAGE = 10;
   let galleryKey = '';
   let galleryIdx = 0;
   let galleryPausedUntil = 0;
+  let galleryPhotos: RecentItem[] = [];
+  let galleryCursor: string | null = null; // API 掃描游標（掃過的最舊一筆 at）
+  let galleryExhausted = false;
+  let galleryLoading = false;
+
+  const slideHtml = (p: RecentItem, i: number): string => {
+    const url = photoUrl(p.photoId!);
+    return `<figure class="slide" data-i="${i}">
+      <a href="${url}" target="_blank" rel="noopener"><img src="${url}" alt="" loading="${i < 2 ? 'eager' : 'lazy'}" /></a>
+      <figcaption><span>${p.place ? esc(placeText(p)) : ''}</span><span class="when">${esc(fmtDateTime(p.at.toDate(), p.tz))}</span>${p.note ? `<span class="note">「${esc(p.note)}」</span>` : ''}</figcaption>
+    </figure>`;
+  };
+  const renderCounter = (): void => {
+    const c = galleryEl.querySelector<HTMLElement>('#gallery-counter');
+    if (c) c.textContent = `${galleryIdx + 1} / ${galleryPhotos.length}${galleryExhausted ? '' : '+'}`;
+  };
+  const appendPhotos = (items: RecentItem[]): void => {
+    const seen = new Set(galleryPhotos.map((p) => p.photoId));
+    const fresh = items.filter((p) => p.photoId && !seen.has(p.photoId));
+    if (!fresh.length) return;
+    const slides = galleryEl.querySelector<HTMLElement>('#slides');
+    if (!slides) return;
+    const base = galleryPhotos.length;
+    galleryPhotos = [...galleryPhotos, ...fresh];
+    slides.insertAdjacentHTML('beforeend', fresh.map((p, k) => slideHtml(p, base + k)).join(''));
+    renderCounter();
+  };
+  const loadMorePhotos = async (): Promise<void> => {
+    if (!view || galleryLoading || galleryExhausted) return;
+    // 1) recent 裡還沒放進來的
+    const seen = new Set(galleryPhotos.map((p) => p.photoId));
+    const fromRecent = view.recent.filter((r) => r.photoId && !seen.has(r.photoId)).slice(0, GALLERY_PAGE);
+    if (fromRecent.length) {
+      appendPhotos(fromRecent);
+      return;
+    }
+    // 2) 比 recent 更舊的，向 API 續抓（游標從 recent 最後一筆開始）
+    galleryLoading = true;
+    try {
+      const before = galleryCursor ?? view.recent[view.recent.length - 1]?.at.toDate().toISOString() ?? new Date().toISOString();
+      const res = await fetch(`/api/w/${encodeURIComponent(token)}/checkins?photos=1&limit=${GALLERY_PAGE}&before=${encodeURIComponent(before)}`);
+      if (!res.ok) {
+        galleryExhausted = true;
+        return;
+      }
+      const data = (await res.json()) as { items: Parameters<typeof toRecent>[0][]; cursor: string | null; exhausted: boolean };
+      galleryCursor = data.cursor;
+      galleryExhausted = data.exhausted;
+      appendPhotos(data.items.map(toRecent));
+    } catch {
+      galleryExhausted = true;
+    } finally {
+      galleryLoading = false;
+      renderCounter();
+    }
+  };
+
   const renderGallery = (): void => {
     if (!view) return;
-    const photos = view.recent.filter((r) => r.photoId).slice(0, 10);
-    const key = photos.map((p) => p.photoId).join(',');
-    if (!photos.length) {
+    const head = view.recent.filter((r) => r.photoId).slice(0, GALLERY_PAGE);
+    const key = head.map((p) => p.photoId).join(',');
+    if (!head.length) {
       galleryEl.hidden = true;
       galleryKey = '';
       return;
     }
     galleryEl.hidden = false;
-    if (key === galleryKey) return;
+    if (key === galleryKey) return; // 只有最新 10 張變了才重建（新照片進來）
     galleryKey = key;
     galleryIdx = 0;
+    galleryPhotos = head;
+    galleryCursor = null;
+    galleryExhausted = false;
     galleryEl.innerHTML = `
-      <div class="slides" id="slides">${photos
-        .map((p, i) => {
-          const at = p.at.toDate();
-          const url = photoUrl(p.photoId!);
-          return `<figure class="slide" data-i="${i}">
-            <a href="${url}" target="_blank" rel="noopener"><img src="${url}" alt="" loading="${i < 2 ? 'eager' : 'lazy'}" /></a>
-            <figcaption><span>${p.place ? esc(placeText(p)) : ''}</span><span class="when">${esc(fmtDateTime(at, p.tz))}</span>${p.note ? `<span class="note">「${esc(p.note)}」</span>` : ''}</figcaption>
-          </figure>`;
-        })
-        .join('')}</div>
-      ${photos.length > 1 ? `<div class="dots">${photos.map((_, i) => `<i data-dot="${i}"${i === 0 ? ' class="on"' : ''}></i>`).join('')}</div>` : ''}`;
+      <div class="slides" id="slides">${head.map(slideHtml).join('')}</div>
+      <div class="gallery-bar"><span class="counter" id="gallery-counter"></span></div>`;
+    renderCounter();
     const slides = galleryEl.querySelector<HTMLElement>('#slides')!;
-    const dots = [...galleryEl.querySelectorAll<HTMLElement>('[data-dot]')];
-    const setDot = (i: number): void => dots.forEach((d, j) => d.classList.toggle('on', i === j));
     slides.addEventListener(
       'scroll',
       () => {
@@ -254,16 +305,12 @@ export function renderFamilyPage(root: HTMLElement, token: string, tlOpts: Timel
         const i = Math.round(slides.scrollLeft / slides.clientWidth);
         if (i !== galleryIdx) {
           galleryIdx = i;
-          setDot(i);
+          renderCounter();
         }
+        // 快到尾端就補下一批
+        if (i >= galleryPhotos.length - 2) void loadMorePhotos();
       },
       { passive: true },
-    );
-    dots.forEach((d) =>
-      d.addEventListener('click', () => {
-        const i = Number(d.dataset.dot);
-        slides.scrollTo({ left: i * slides.clientWidth, behavior: 'smooth' });
-      }),
     );
   };
   const galleryTimer = window.setInterval(() => {
@@ -272,10 +319,9 @@ export function renderFamilyPage(root: HTMLElement, token: string, tlOpts: Timel
     const n = slides.children.length;
     if (n < 2) return;
     const next = (galleryIdx + 1) % n;
-    galleryPausedUntil = 0;
-    slides.scrollTo({ left: next * slides.clientWidth, behavior: 'smooth' });
     galleryIdx = next;
-    galleryEl.querySelectorAll<HTMLElement>('[data-dot]').forEach((d, j) => d.classList.toggle('on', j === next));
+    slides.scrollTo({ left: next * slides.clientWidth, behavior: 'smooth' });
+    renderCounter();
     // 自動輪播觸發的 scroll 事件不該算成使用者操作
     window.setTimeout(() => (galleryPausedUntil = 0), 800);
   }, 5000);
