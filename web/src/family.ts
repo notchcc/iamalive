@@ -239,7 +239,7 @@ export function renderFamilyPage(root: HTMLElement, token: string, tlOpts: Timel
           const url = photoUrl(p.photoId!);
           return `<figure class="slide" data-i="${i}">
             <a href="${url}" target="_blank" rel="noopener"><img src="${url}" alt="" loading="${i < 2 ? 'eager' : 'lazy'}" /></a>
-            <figcaption><span>${p.place ? esc(placeText(p)) : ''}</span><span class="when">${esc(fmtBoth(at, p.tz))}</span>${p.note ? `<span class="note">「${esc(p.note)}」</span>` : ''}</figcaption>
+            <figcaption><span>${p.place ? esc(placeText(p)) : ''}</span><span class="when">${esc(fmtDateTime(at, p.tz))}</span>${p.note ? `<span class="note">「${esc(p.note)}」</span>` : ''}</figcaption>
           </figure>`;
         })
         .join('')}</div>
