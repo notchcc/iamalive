@@ -383,6 +383,9 @@ async function main() {
   assert.ok(page2.every((x) => x.at < page1[1].at), 'before excludes newer');
   assert.ok(!page2.some((x) => x.id === page1[0].id || x.id === page1[1].id), 'no overlap');
   assert.equal((await fetch(`${BASE}/w/notavalidtoken_notavalid/checkins`)).status, 404);
+  pub = await fetch(`${BASE}/w/${trip.groupReadToken}/checkins?photos=1&limit=5`);
+  const ph = await pub.json();
+  assert.ok(Array.isArray(ph.items) && typeof ph.exhausted === 'boolean' && ph.items.every((x) => x.photoId), 'photos-only paging');
   log('family timeline paging ok');
 
   // AI 讀取用摘要 JSON / 純文字
