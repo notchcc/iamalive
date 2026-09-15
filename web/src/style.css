@@ -216,12 +216,8 @@ details.extras summary .muted { color: var(--text); font-size: 13px; min-width: 
 
 /* ===== 家人頁：明信片牌堆（隨機輪播有照片的打卡） ===== */
 .gallery { margin-bottom: 12px; }
-.pc-embed .pc-deck { position: relative; display: grid; place-items: center; padding: 16px; perspective: 1400px; overflow: hidden; border-radius: 14px;
-  aspect-ratio: 4 / 3; max-height: 56vh; box-sizing: border-box;
-  background:
-    radial-gradient(900px 400px at 20% -10%, rgba(255, 214, 165, 0.18), transparent 60%),
-    radial-gradient(700px 400px at 110% 110%, rgba(120, 170, 200, 0.16), transparent 60%),
-    linear-gradient(160deg, #1f2a33 0%, #2b3540 55%, #1c2229 100%); }
+.pc-embed .pc-deck { position: relative; display: grid; place-items: center; padding: 14px 12px 22px; perspective: 1400px; overflow: hidden;
+  aspect-ratio: 4 / 3; max-height: 56vh; box-sizing: border-box; background: none; }
 .pc-nav { position: absolute; top: 50%; transform: translateY(-50%); z-index: 3; width: 40px; height: 40px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.25); background: rgba(0,0,0,0.32); color: rgba(255,255,255,0.9); display: none; align-items: center; justify-content: center; padding: 0; cursor: pointer; backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); transition: opacity 0.4s, background 0.2s; }
 .pc-deck.has-cards .pc-nav { display: flex; }
 .pc-deck.nav-hidden .pc-nav { opacity: 0; pointer-events: none; }
@@ -232,8 +228,8 @@ details.extras summary .muted { color: var(--text); font-size: 13px; min-width: 
 .pc-nav:not(:disabled):active { background: rgba(0,0,0,0.55); }
 @keyframes pc-nudge { 0%, 100% { transform: translateY(-50%) translateX(0); } 50% { transform: translateY(-50%) translateX(4px); } }
 
-.postcard { grid-area: 1 / 1; width: min(100%, calc((56vh - 32px) * 1.3333)); aspect-ratio: 4 / 3; background: #fbf8f1; color: #2b2b2b; border-radius: 6px;
-  box-shadow: 0 24px 50px rgba(0,0,0,0.45), 0 2px 0 rgba(255,255,255,0.5) inset; display: block; overflow: hidden; position: relative;
+.postcard { grid-area: 1 / 1; width: min(100%, calc((56vh - 36px) * 1.3333)); aspect-ratio: 4 / 3; background: #fbf8f1; color: #2b2b2b; border-radius: 6px;
+  box-shadow: 0 14px 34px rgba(0,0,0,0.22), 0 2px 6px rgba(0,0,0,0.10); display: block; overflow: hidden; position: relative;
   transform: rotate(var(--rot)) scale(1); transition: transform 0.7s cubic-bezier(.2,.8,.2,1), opacity 0.7s ease; will-change: transform, opacity; }
 .postcard::after { content: ''; position: absolute; inset: 0; pointer-events: none; border-radius: 6px;
   background: repeating-linear-gradient(0deg, rgba(0,0,0,0.012) 0 1px, transparent 1px 3px); mix-blend-mode: multiply; }
