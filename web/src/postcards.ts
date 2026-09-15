@@ -60,11 +60,9 @@ export function renderPostcardsPage(root: HTMLElement, token: string): () => voi
         <button class="pc-pause" id="pc-pause" type="button" aria-label="暫停">❚❚</button>
       </header>
       <div class="pc-deck" id="pc-deck"><p class="pc-empty">載入中…</p></div>
-      <div class="pc-foot"><span id="pc-counter"></span><span class="pc-hint">點一下或左右滑動換一張</span></div>
     </div>`;
   const deck = root.querySelector<HTMLElement>('#pc-deck')!;
   const titleEl = root.querySelector<HTMLElement>('#pc-title')!;
-  const counterEl = root.querySelector<HTMLElement>('#pc-counter')!;
   const pauseBtn = root.querySelector<HTMLButtonElement>('#pc-pause')!;
   const photoUrl = (id: string): string => `/api/p/${encodeURIComponent(token)}/${encodeURIComponent(id)}`;
 
@@ -82,12 +80,11 @@ export function renderPostcardsPage(root: HTMLElement, token: string): () => voi
     const [city, ...rest] = place.split(',').map((x) => x.trim());
     return `
       <article class="postcard" style="--rot:${rot}deg">
-        <div class="pc-photo"><img src="${photoUrl(p.photoId!)}" alt="" /></div>
+        <div class="pc-photo"><img src="${photoUrl(p.photoId!)}" alt="" />
+          <div class="pc-postmark"><span>${esc(ld.short)}</span><small>${esc(city)}</small></div>
+        </div>
         <div class="pc-side">
-          <div class="pc-topline">
-            <div class="pc-postmark"><span>${esc(ld.short)}</span><small>${esc(city)}</small></div>
-            <div class="pc-stamp"><span>${esc(title || 'iamalive')}</span></div>
-          </div>
+          <div class="pc-topline"><div class="pc-stamp"><span>${esc(title || 'iamalive')}</span></div></div>
           <h2 class="pc-place">${esc(city)}</h2>
           ${rest.length ? `<div class="pc-region">${esc(rest.join(', '))}</div>` : ''}
           <div class="pc-date">${esc(ld.date)} · ${esc(ld.time)}</div>
@@ -125,7 +122,6 @@ export function renderPostcardsPage(root: HTMLElement, token: string): () => voi
       window.setTimeout(() => prev.remove(), 700);
     }
     deck.querySelector('.pc-empty')?.remove();
-    counterEl.textContent = `${photos.length} 張照片`;
     preload(order[pos + 1]);
   };
 
