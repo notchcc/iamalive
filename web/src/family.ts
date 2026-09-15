@@ -1,5 +1,5 @@
 /**
- * 家人頁 /w/{readToken}：雙時鐘、狀態、明信片牌堆、地圖、時間軸。onSnapshot 即時更新。
+ * 家人頁 /w/{readToken}：雙時鐘、狀態、照片幻燈片、地圖、時間軸。onSnapshot 即時更新。
  */
 import { Timestamp, doc, onSnapshot } from 'firebase/firestore';
 import L from 'leaflet';
@@ -218,7 +218,7 @@ export function renderFamilyPage(root: HTMLElement, token: string, tlOpts: Timel
       '</ul><p class="muted small">時間為各地當地時間；飛行中不會發出警報，落地後 3 小時內需回報。</p>';
   };
 
-  // ---- 地圖：預設框住已載入的打卡點；明信片換卡（含自動輪播）時飛到該張照片的拍攝地 ----
+  // ---- 地圖：預設框住已載入的打卡點；幻燈片換張（含自動輪播）時飛到該張照片的拍攝地 ----
   const mapAllBtn = root.querySelector<HTMLButtonElement>('#map-all')!;
   const mapEl = root.querySelector<HTMLElement>('#map')!;
   const focusMarker = L.circleMarker([0, 0], { radius: 10, color: '#fff', weight: 3, fillColor: '#b8412f', fillOpacity: 1 });
@@ -248,7 +248,7 @@ export function renderFamilyPage(root: HTMLElement, token: string, tlOpts: Timel
   };
   mapAllBtn.addEventListener('click', showAllPoints);
 
-  // ---- 明信片牌堆：recent 內有照片的先進牌堆，其餘向 API 續抓（每頁 50，最多 200 張），隨機輪播 ----
+  // ---- 照片幻燈片（隨機）：recent 內有照片的先進牌堆，其餘向 API 續抓（每頁 50，最多 200 張），隨機輪播 ----
   let deck: PostcardDeck | null = null;
   let pcCursor: string | null = null; // API 掃描游標（掃過的最舊一筆 at）
   let pcExhausted = false;
@@ -262,6 +262,7 @@ export function renderFamilyPage(root: HTMLElement, token: string, tlOpts: Timel
           tz: r.tz,
           place: r.place ?? null,
           placeEn: r.placeEn ?? null,
+          note: r.note,
           takenAt: r.takenAt ? r.takenAt.toDate().toISOString() : null,
           at: r.at.toDate().toISOString(),
         }

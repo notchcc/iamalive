@@ -214,10 +214,9 @@ details.extras summary::after { content: '▾'; margin-left: auto; }
 details.extras[open] summary::after { content: '▴'; }
 details.extras summary .muted { color: var(--text); font-size: 13px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* ===== 家人頁：明信片牌堆（隨機輪播有照片的打卡） ===== */
+/* ===== 家人頁：照片幻燈片（隨機輪播、箭頭自動隱藏） ===== */
 .gallery { margin-bottom: 12px; }
-.pc-embed .pc-deck { position: relative; display: grid; place-items: center; padding: 14px 12px 22px; perspective: 1400px; overflow: hidden;
-  aspect-ratio: 4 / 3; max-height: 56vh; box-sizing: border-box; background: none; }
+.pc-embed .pc-deck { position: relative; display: block; overflow: hidden; border-radius: 14px; background: #111827; aspect-ratio: 4 / 3; max-height: 56vh; }
 .pc-nav { position: absolute; top: 50%; transform: translateY(-50%); z-index: 3; width: 40px; height: 40px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.25); background: rgba(0,0,0,0.32); color: rgba(255,255,255,0.9); display: none; align-items: center; justify-content: center; padding: 0; cursor: pointer; backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); transition: opacity 0.4s, background 0.2s; }
 .pc-deck.has-cards .pc-nav { display: flex; }
 .pc-deck.nav-hidden .pc-nav { opacity: 0; pointer-events: none; }
@@ -228,26 +227,17 @@ details.extras summary .muted { color: var(--text); font-size: 13px; min-width: 
 .pc-nav:not(:disabled):active { background: rgba(0,0,0,0.55); }
 @keyframes pc-nudge { 0%, 100% { transform: translateY(-50%) translateX(0); } 50% { transform: translateY(-50%) translateX(4px); } }
 
-.postcard { grid-area: 1 / 1; width: min(100%, calc((56vh - 36px) * 1.3333)); aspect-ratio: 4 / 3; background: #fbf8f1; color: #2b2b2b; border-radius: 6px;
-  box-shadow: 0 14px 34px rgba(0,0,0,0.22), 0 2px 6px rgba(0,0,0,0.10); display: block; overflow: hidden; position: relative;
-  transform: rotate(var(--rot)) scale(1); transition: transform 0.7s cubic-bezier(.2,.8,.2,1), opacity 0.7s ease; will-change: transform, opacity; }
-.postcard::after { content: ''; position: absolute; inset: 0; pointer-events: none; border-radius: 6px;
-  background: repeating-linear-gradient(0deg, rgba(0,0,0,0.012) 0 1px, transparent 1px 3px); mix-blend-mode: multiply; }
-.postcard.enter-right { transform: translateX(60vw) rotate(calc(var(--rot) + 12deg)) scale(0.9); opacity: 0; }
-.postcard.enter-left { transform: translateX(-60vw) rotate(calc(var(--rot) - 12deg)) scale(0.9); opacity: 0; }
-.postcard.in { transform: translateX(0) rotate(var(--rot)) scale(1); opacity: 1; }
-.postcard.leave-left { transform: translateX(-70vw) rotate(calc(var(--rot) - 10deg)) scale(0.92); opacity: 0; }
-.postcard.leave-right { transform: translateX(70vw) rotate(calc(var(--rot) + 10deg)) scale(0.92); opacity: 0; }
-.pc-photo { position: relative; padding: 12px; height: 100%; box-sizing: border-box; overflow: hidden; cursor: zoom-in; }
-.pc-photo img { width: 100%; height: 100%; object-fit: cover; display: block; border: 5px solid #fff; box-sizing: border-box; box-shadow: 0 2px 6px rgba(0,0,0,0.18); background: #ddd; }
-@media (max-width: 640px) { .pc-photo { padding: 10px; } }
-
-/* 明信片標示：左下角英文地名 + 日期（單一字體 Noto Serif TC） */
-.pc-shade { position: absolute; left: 12px; right: 12px; bottom: 12px; height: 62%; background: linear-gradient(to top, rgba(0,0,0,0.66) 0%, rgba(0,0,0,0.42) 30%, rgba(0,0,0,0.15) 62%, rgba(0,0,0,0) 100%); pointer-events: none; }
-.pc-mark { position: absolute; left: 28px; right: 28px; bottom: 26px; color: #fff; pointer-events: none; text-shadow: 0 1px 4px rgba(0,0,0,0.55); font-family: 'Noto Serif TC', Georgia, 'Times New Roman', serif; }
-.pc-mark .mk-city { font-weight: 700; font-size: clamp(20px, 3.4vw, 34px); letter-spacing: 3px; line-height: 1.1; }
-.pc-mark .mk-sub { font-weight: 500; font-size: clamp(13px, 1.8vw, 17px); letter-spacing: 2px; opacity: 0.92; margin-top: 6px; }
-@media (max-width: 640px) { .pc-mark { left: 22px; bottom: 22px; } }
+.pc-deck .slide { position: absolute; inset: 0; margin: 0; overflow: hidden; cursor: zoom-in;
+  transform: translateX(0); transition: transform 0.6s cubic-bezier(.2,.8,.2,1), opacity 0.6s ease; will-change: transform, opacity; }
+.pc-deck .slide img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.pc-deck .slide figcaption { position: absolute; left: 0; right: 0; bottom: 0; padding: 26px 12px 10px; background: linear-gradient(to top, rgba(0,0,0,0.65), rgba(0,0,0,0)); color: #fff; font-size: 13px; display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+.pc-deck .slide figcaption .when { opacity: 0.85; font-variant-numeric: tabular-nums; }
+.pc-deck .slide figcaption .note { flex-basis: 100%; opacity: 0.95; }
+.pc-deck .slide.enter-right { transform: translateX(100%); }
+.pc-deck .slide.enter-left { transform: translateX(-100%); }
+.pc-deck .slide.in { transform: translateX(0); }
+.pc-deck .slide.leave-left { transform: translateX(-100%); }
+.pc-deck .slide.leave-right { transform: translateX(100%); }
 
 /* 全螢幕檢視 */
 .pc-lightbox { position: fixed; inset: 0; z-index: 10000; background: rgba(0,0,0,0.94); display: flex; align-items: center; justify-content: center; }

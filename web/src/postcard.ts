@@ -1,7 +1,8 @@
 /**
- * 明信片牌堆（家人頁用）：隨機輪播有照片的打卡，卡片左下角標英文地名與當地日期，
+ * 照片幻燈片（家人頁用）：隨機輪播有照片的打卡，字幕為地點、打卡當地日期時間與備註，
  * 左右箭頭 5 秒自動隱藏，點照片開全螢幕檢視（X / 下載）。
  */
+import { fmtDateTime, tzLabel } from './time';
 
 export interface PostcardPhoto {
   photoId: string;
@@ -10,6 +11,7 @@ export interface PostcardPhoto {
   tz: string;
   place: string | null;
   placeEn?: string | null;
+  note?: string;
   takenAt: string | null; // ISO
   at: string; // ISO
 }
@@ -32,15 +34,6 @@ export interface PostcardDeck {
 
 function esc(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
-}
-
-export function ensurePostcardFonts(): void {
-  if (document.getElementById('pc-fonts')) return;
-  const l = document.createElement('link');
-  l.id = 'pc-fonts';
-  l.rel = 'stylesheet';
-  l.href = 'https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@500;700&display=swap';
-  document.head.appendChild(l);
 }
 
 function shuffle<T>(arr: T[]): T[] {
@@ -69,18 +62,14 @@ export function postcardFileName(p: PostcardPhoto): string {
   return `${(lb.city || lb.country || 'photo').replace(/\s+/g, '_')}_${(p.takenAt ?? p.at).slice(0, 10)}.jpg`;
 }
 
-/** 一張明信片的 HTML：照片 + 左下角地名與日期（單一字體）。 */
-export function postcardMarkup(p: PostcardPhoto, opts: { photoUrl: (id: string) => string; rot: number }): string {
-  const lb = resolveLabel(p);
-  const src = opts.photoUrl(p.photoId);
-  const sub = [lb.country, lb.short].filter(Boolean).join(' · ');
+/** 一張幻燈片的 HTML：滿版照片 + 底部字幕（地點、打卡當地日期時間、備註）。 */
+export function slideMarkup(p: PostcardPhoto, photoUrl: (id: string) => string): string {
+  const when = fmtDateTime(new Date(p.at), p.tz);
   return `
-      <article class="postcard" style="--rot:${opts.rot}deg">
-        <div class="pc-photo"><img src="${src}" alt="" />
-          <div class="pc-shade"></div>
-          <div class="pc-mark">${lb.city ? `<div class="mk-city">${esc(lb.city)}</div>` : ''}<div class="mk-sub">${esc(sub)}</div></div>
-        </div>
-      </article>`;
+      <figure class="slide">
+        <img src="${photoUrl(p.photoId)}" alt="" />
+        <figcaption><span>${esc(p.place || tzLabel(p.tz))}</span><span class="when">${esc(when)}</span>${p.note ? `<span class="note">「${esc(p.note)}」</span>` : ''}</figcaption>
+      </figure>`;
 }
 
 const CHEV_L = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 5-7 7 7 7"/></svg>';
@@ -90,7 +79,6 @@ const DL_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stro
 const NAV_HIDE_MS = 5000;
 
 export function createPostcardDeck(host: HTMLElement, opts: DeckOptions): PostcardDeck {
-  ensurePostcardFonts();
   const INTERVAL = opts.intervalMs ?? 7000;
   host.innerHTML = `
     <div class="pc-deck" id="pc-deck">
@@ -168,9 +156,8 @@ export function createPostcardDeck(host: HTMLElement, opts: DeckOptions): Postca
   };
 
   const show = (p: PostcardPhoto, dir: 1 | -1, manual: boolean): void => {
-    const prev = deck.querySelector<HTMLElement>('.postcard:not(.leave)');
-    const rot = (Math.random() * 5 - 2.5).toFixed(1);
-    deck.insertAdjacentHTML('beforeend', postcardMarkup(p, { photoUrl: opts.photoUrl, rot: Number(rot) }));
+    const prev = deck.querySelector<HTMLElement>('.slide:not(.leave)');
+    deck.insertAdjacentHTML('beforeend', slideMarkup(p, opts.photoUrl));
     const card = deck.lastElementChild as HTMLElement;
     card.classList.add(dir === 1 ? 'enter-right' : 'enter-left');
     requestAnimationFrame(() => card.classList.add('in'));
@@ -178,7 +165,7 @@ export function createPostcardDeck(host: HTMLElement, opts: DeckOptions): Postca
     current = p;
     if (prev) {
       prev.classList.add('leave', dir === 1 ? 'leave-left' : 'leave-right');
-      window.setTimeout(() => prev.remove(), 700);
+      window.setTimeout(() => prev.remove(), 600);
     }
     prevBtn.disabled = pos <= 0;
     deck.classList.add('has-cards');
@@ -215,7 +202,7 @@ export function createPostcardDeck(host: HTMLElement, opts: DeckOptions): Postca
     next(true);
   });
   deck.addEventListener('click', (e) => {
-    if ((e.target as HTMLElement).closest('.pc-photo')) openViewer();
+    if ((e.target as HTMLElement).closest('.slide')) openViewer();
   });
   deck.addEventListener('pointerenter', showNav);
   deck.addEventListener('pointermove', showNav);
