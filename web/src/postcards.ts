@@ -83,7 +83,7 @@ export function postcardMarkup(p: PhotoJson, opts: { photoUrl: (id: string) => s
       const tl = lb.city.length * 8.2 > arcLen - 10 ? ` textLength="${arcLen - 10}" lengthAdjust="spacingAndGlyphs"` : '';
       void cityLen;
       markHtml = `<svg class="pc-mark pc-round" viewBox="0 0 120 120" aria-hidden="true">
-        <defs><path id="arcTop" d="M 20,60 a 40,40 0 1,1 80,0"/><path id="arcBot" d="M 100,60 a 40,40 0 1,1 -80,0"/></defs>
+        <defs><path id="arcTop" d="M 20,60 a 40,40 0 1,1 80,0"/><path id="arcBot" d="M 14,60 a 46,46 0 0,0 92,0"/></defs>
         <circle cx="60" cy="60" r="56" fill="rgba(0,0,0,0.28)" stroke="rgba(255,255,255,0.95)" stroke-width="2.5"/>
         <circle cx="60" cy="60" r="34" fill="none" stroke="rgba(255,255,255,0.8)" stroke-width="1.2" stroke-dasharray="3 3"/>
         <text font-size="11" font-weight="700" letter-spacing="1.5" fill="#fff"><textPath href="#arcTop" startOffset="50%" text-anchor="middle"${tl}>${esc(lb.city)}</textPath></text>
