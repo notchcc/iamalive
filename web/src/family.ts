@@ -230,9 +230,18 @@ export function renderFamilyPage(root: HTMLElement, token: string, tlOpts: Timel
     if (collapsed) {
       const placeShort = (lastItem ? placeText(lastItem) : tzLabel(view.travelerTz)).split(',')[0].trim();
       if (lastPlace.textContent !== placeShort) lastPlace.textContent = placeShort;
-      const deadlineLine =
-        view.status === 'active' ? `${deadline > now ? '下次期限' : '預定回報時間'} ${fmtBoth(deadline, view.travelerTz)}${shiftNote}` : '';
-      lastPanel.innerHTML = `${lastLine}${deadlineLine ? `<div class="sub">${esc(deadlineLine)}</div>` : ''}`;
+      // 面板：兩列「標籤 / 內容」，不用圖示；順延原因做成小標籤
+      const lastTz = lastItem?.tz ?? view.travelerTz;
+      const shiftTag = view.deadlineShift === 'sleep' ? '睡眠時段順延' : view.deadlineShift === 'flight' ? '航段順延' : '';
+      const rows = [
+        `<div class="k">最後打卡</div><div class="v">${lastItem ? `<div>${esc(placeText(lastItem))}</div>` : ''}<div class="muted">${esc(fmtBoth(last, lastTz))}</div>${lastItem?.note ? `<div class="note">「${esc(lastItem.note)}」</div>` : ''}</div>`,
+      ];
+      if (view.status === 'active') {
+        rows.push(
+          `<div class="k">${deadline > now ? '下次期限' : '預定回報'}</div><div class="v"><div>${esc(fmtBoth(deadline, view.travelerTz))}${shiftTag ? ` <span class="tag">${shiftTag}</span>` : ''}</div></div>`,
+        );
+      }
+      lastPanel.innerHTML = `<div class="kv">${rows.join('')}</div>`;
       lastPanel.hidden = !lastOpen;
     } else {
       lastPanel.hidden = true;

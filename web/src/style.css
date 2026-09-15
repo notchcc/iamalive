@@ -209,8 +209,12 @@ label.inline.small { font-size: 13px; color: var(--muted); margin: 6px 0 2px; }
 .card-toggle.on { background: #1d4ed8; border-color: #1d4ed8; color: #fff; }
 .card-panel { margin-top: 10px; padding-top: 8px; border-top: 1px dashed rgba(0,0,0,0.15); }
 .card-panel[hidden] { display: none; }
-.card-panel .last { font-size: 14px; }
-.card-panel .sub { font-size: 14px; margin-top: 2px; }
+.card-panel .kv { display: grid; grid-template-columns: auto 1fr; column-gap: 12px; row-gap: 8px; font-size: 14px; line-height: 1.45; }
+.card-panel .kv .k { color: var(--muted); font-size: 13px; padding-top: 1px; white-space: nowrap; }
+.card-panel .kv .v { min-width: 0; }
+.card-panel .kv .v .muted { font-size: 13px; }
+.card-panel .kv .v .note { font-size: 13px; color: var(--muted); }
+.card-panel .tag { display: inline-block; font-size: 11px; line-height: 1; padding: 3px 6px; border-radius: 999px; background: rgba(0,0,0,0.07); color: var(--muted); vertical-align: 1px; white-space: nowrap; }
 .flights-panel .fsum { font-size: 13px; color: var(--muted); margin-bottom: 2px; }
 .flights-panel ul { list-style: none; margin: 0; padding: 0; }
 .flights-panel .flight { border-bottom-color: rgba(0,0,0,0.12); }
