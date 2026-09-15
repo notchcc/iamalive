@@ -188,7 +188,9 @@ label.inline input { width: auto; margin: 0; }
 .fc-summary li { margin: 2px 0; }
 .fc-card { padding-bottom: 10px; }
 label.inline.small { font-size: 13px; color: var(--muted); margin: 6px 0 2px; }
-.map-card .map.small { margin-top: 4px; }
+.map-card .map.small { margin-top: 0; height: 240px; }
+.map-card #cp-map-note { margin: 6px 0 0; }
+.map-card .action-grid { margin-top: 10px; }
 
 /* 家人頁：美化 */
 .family .card, .family .status, .family .clock, .family .flights, .family .tl-item { box-shadow: 0 1px 2px rgba(17, 24, 39, 0.04), 0 4px 14px rgba(17, 24, 39, 0.04); }

@@ -47,17 +47,14 @@ export function renderCheckinPage(root: HTMLElement, token: string): () => void 
     <div class="page checkin-page">
       <section class="status" id="cp-status"><p class="muted">載入中…</p></section>
       <section class="card map-card">
-        <h2>位置 <span class="muted">藍點為目前位置，其餘為最近 5 次打卡</span></h2>
         <div id="cp-map" class="map small"></div>
         <p id="cp-map-note" class="muted small"></p>
-      </section>
-      <section class="card">
         <div class="action-grid">
           <button id="cp-gps" type="button" class="tile"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s7-6.2 7-12a7 7 0 1 0-14 0c0 5.8 7 12 7 12Z"/><circle cx="12" cy="10" r="2.6"/></svg></span><span class="lbl">定位打卡</span></button>
           <button id="cp-take" type="button" class="tile"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8.5A1.5 1.5 0 0 1 5.5 7H8l1.4-2h5.2L16 7h2.5A1.5 1.5 0 0 1 20 8.5v9A1.5 1.5 0 0 1 18.5 19h-13A1.5 1.5 0 0 1 4 17.5v-9Z"/><circle cx="12" cy="13" r="3.4"/></svg></span><span class="lbl">拍照打卡</span></button>
           <button id="cp-choose" type="button" class="tile"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="m20 15-4.5-4.5L8 18"/></svg></span><span class="lbl">選擇照片</span></button>
         </div>
-        <details class="extras" id="cp-extras"><summary>備註 / 下次回報 <span class="muted" id="cp-extras-sum"></span></summary>
+        <details class="extras" id="cp-extras"><summary>進階選項 <span class="muted" id="cp-extras-sum"></span></summary>
           <label>備註<input id="cp-note" maxlength="200" placeholder="可空，例如：已到飯店" /></label>
           <label>下次回報（小時，可空）<input id="cp-next" type="number" min="1" max="168" step="1" inputmode="numeric" /></label>
         </details>
