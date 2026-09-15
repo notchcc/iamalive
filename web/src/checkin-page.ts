@@ -68,7 +68,6 @@ export function renderCheckinPage(root: HTMLElement, token: string): () => void 
           </div>
         </div>
       </section>
-      <div id="share"></div>
       <section class="card fc-card"><h2>接下來 24 小時 <span class="muted">假設不再打卡</span></h2><div id="cp-forecast" class="forecast"></div></section>
       <section class="card map-card">
         <h2>位置 <span class="muted">藍點為目前位置，其餘為最近 5 次打卡</span></h2>
@@ -76,6 +75,7 @@ export function renderCheckinPage(root: HTMLElement, token: string): () => void 
         <p id="cp-map-note" class="muted small"></p>
       </section>
       <section class="timeline"><h2>最近 5 次打卡</h2><ul id="cp-timeline"></ul></section>
+      <div id="share"></div>
       <footer class="foot"><small>此頁不需登入，持有連結者即可替這趟行程打卡，請勿轉傳。<br><button id="cp-refresh" class="link" type="button">重新整理</button></small></footer>
     </div>`;
 
