@@ -295,7 +295,8 @@ export function renderFamilyPage(root: HTMLElement, token: string, tlOpts: Timel
     galleryExhausted = false;
     galleryEl.innerHTML = `
       <div class="slides" id="slides">${head.map(slideHtml).join('')}</div>
-      <span class="counter" id="gallery-counter"></span>`;
+      <span class="counter" id="gallery-counter"></span>
+      <a class="pc-link" href="/g/${encodeURIComponent(token)}">🖼 明信片模式</a>`;
     renderCounter();
     const slides = galleryEl.querySelector<HTMLElement>('#slides')!;
     slides.addEventListener(
