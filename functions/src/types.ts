@@ -65,6 +65,8 @@ export interface Checkin {
   tz: string;
   /** 「城市, 國家」，反向地理編碼結果，查不到為 null。 */
   place: string | null;
+  /** 英文「City, Country」（明信片郵戳用）；舊資料沒有，讀取時補。 */
+  placeEn?: string | null;
   note: string;
   nextHours: number | null;
   /** 照片 ID（GCS 物件名），無照片為 null。 */
@@ -84,6 +86,7 @@ export interface RecentItem {
   src: CheckinSource;
   tz: string;
   place: string | null;
+  placeEn?: string | null;
   note: string;
   photoId: string | null;
   takenAt: Timestamp | null;

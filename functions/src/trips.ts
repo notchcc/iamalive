@@ -5,7 +5,7 @@
 import { randomBytes } from 'node:crypto';
 import tzlookup from 'tz-lookup';
 import { familyUrl } from './config.js';
-import { reverseGeocode } from './geocode.js';
+import { reverseGeocode, reverseGeocodeEn } from './geocode.js';
 import { deletePhoto } from './photos.js';
 import { FieldValue, GeoPoint, Timestamp, checkinsCol, db, tripsCol, viewsCol, type TripSnap } from './db.js';
 import { endMessages, offlineMessages, pushGroup, recoveryMessages, startMessages } from './line.js';
@@ -52,6 +52,7 @@ function recentFromCheckins(docs: Array<{ id: string; data: Checkin }>): RecentI
     src: c.source,
     tz: c.tz,
     place: c.place ?? null,
+    placeEn: c.placeEn ?? null,
     note: c.note,
     photoId: c.photoId ?? null,
     takenAt: c.takenAt ?? null,
@@ -185,6 +186,7 @@ export async function recordCheckin(snap: TripSnap, input: CheckinInput): Promis
   const isNewest = !prevLast || at.getTime() > prevLast.getTime();
   const tz = tzFor(input.lat, input.lng);
   const place = await reverseGeocode(input.lat, input.lng);
+  const placeEn = await reverseGeocodeEn(input.lat, input.lng);
   const hours = input.nextHours ?? trip.intervalHours;
   // 行程開始前的打卡：期限從開始時間起算，避免出發前就觸發警報。
   const base = trip.startAt.toDate() > at ? trip.startAt.toDate() : at;
@@ -198,6 +200,7 @@ export async function recordCheckin(snap: TripSnap, input: CheckinInput): Promis
     source: input.source,
     tz,
     place,
+    placeEn,
     note: input.note,
     nextHours: input.nextHours,
     photoId: input.photoId ?? null,

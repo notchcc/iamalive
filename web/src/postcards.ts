@@ -12,6 +12,7 @@ interface PhotoJson {
   lng: number;
   tz: string;
   place: string | null;
+  placeEn?: string | null;
   note: string;
   photoId: string | null;
   takenAt: string | null;
@@ -59,7 +60,10 @@ export function renderPostcardsPage(root: HTMLElement, token: string): () => voi
       <header class="pc-head">
         <a class="pc-back" href="/w/${encodeURIComponent(token)}">‹ 家人頁</a>
         <span class="pc-title" id="pc-title"></span>
-        <button class="pc-pause" id="pc-pause" type="button" aria-label="暫停">❚❚</button>
+        <span class="pc-actions">
+          <a class="pc-dl" id="pc-dl" href="#" download aria-label="下載這張照片" title="下載這張照片" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg></a>
+          <button class="pc-pause" id="pc-pause" type="button" aria-label="暫停">❚❚</button>
+        </span>
       </header>
       <div class="pc-deck" id="pc-deck"><p class="pc-empty">載入中…</p></div>
       <div class="pc-mapwrap"><div id="pc-map" class="pc-mapbig"></div></div>
@@ -67,6 +71,7 @@ export function renderPostcardsPage(root: HTMLElement, token: string): () => voi
   const deck = root.querySelector<HTMLElement>('#pc-deck')!;
   const titleEl = root.querySelector<HTMLElement>('#pc-title')!;
   const pauseBtn = root.querySelector<HTMLButtonElement>('#pc-pause')!;
+  const dlEl = root.querySelector<HTMLAnchorElement>('#pc-dl')!;
   const photoUrl = (id: string): string => `/api/p/${encodeURIComponent(token)}/${encodeURIComponent(id)}`;
 
   let title = '';
@@ -80,11 +85,14 @@ export function renderPostcardsPage(root: HTMLElement, token: string): () => voi
   const cardHtml = (p: PhotoJson, rot: number): string => {
     const ld = localDate(p.takenAt ?? p.at, p.tz);
     const place = p.place ?? `${p.lat.toFixed(3)}, ${p.lng.toFixed(3)}`;
-    const city = place.split(',')[0].trim();
+    // 郵戳一律英文：placeEn 的城市；沒有就退回座標
+    const en = p.placeEn ?? null;
+    const cityEn = (en ? en.split(',')[0].trim() : `${p.lat.toFixed(2)}°, ${p.lng.toFixed(2)}°`).toUpperCase();
+    const countryEn = en && en.includes(',') ? en.split(',').slice(1).join(',').trim().toUpperCase() : '';
     return `
       <article class="postcard" style="--rot:${rot}deg">
         <div class="pc-photo"><img src="${photoUrl(p.photoId!)}" alt="" title="${esc(place)}" />
-          <div class="pc-postmark"><span>${esc(ld.short)}</span><small>${esc(city)}</small></div>
+          <div class="pc-postmark"><span class="pm-city">${esc(cityEn)}</span><span class="pm-sub">${esc(countryEn ? `${countryEn} · ${ld.short}` : ld.short)}</span><i class="pm-waves"></i></div>
         </div>
       </article>`;
   };
@@ -134,6 +142,9 @@ export function renderPostcardsPage(root: HTMLElement, token: string): () => voi
     card.classList.add(dir === 1 ? 'enter-right' : 'enter-left');
     requestAnimationFrame(() => card.classList.add('in'));
     focusMap(p);
+    dlEl.hidden = false;
+    dlEl.href = photoUrl(p.photoId!);
+    dlEl.setAttribute('download', `${(p.placeEn ?? p.place ?? 'photo').split(',')[0].trim().replace(/\s+/g, '_')}_${(p.takenAt ?? p.at).slice(0, 10)}.jpg`);
     if (prev) {
       prev.classList.add('leave', dir === 1 ? 'leave-left' : 'leave-right');
       window.setTimeout(() => prev.remove(), 700);

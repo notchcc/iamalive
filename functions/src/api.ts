@@ -53,7 +53,8 @@ import type { FlightSegment } from './types.js';
 import { parseMultipart } from './multipart.js';
 import { lookupFlight } from './flights-api.js';
 import { MAX_PHOTO_BYTES, isAllowedImage, readPhoto, savePhoto } from './photos.js';
-import { viewsCol } from './db.js';
+import { checkinsCol, viewsCol } from './db.js';
+import { reverseGeocodeEn } from './geocode.js';
 
 const isoDate = z
   .string()
@@ -422,6 +423,7 @@ export function createApp(): express.Express {
         src: it.src,
         tz: it.tz,
         place: it.place ?? null,
+        placeEn: it.placeEn ?? null,
         note: it.note,
         photoId: it.photoId ?? null,
         takenAt: it.takenAt ? it.takenAt.toDate().toISOString() : null,
@@ -443,6 +445,18 @@ export function createApp(): express.Express {
           if (page.length < 25) {
             exhausted = true;
             break;
+          }
+        }
+        // 舊照片沒有英文地名：每次最多補 4 筆並寫回（Nominatim 每秒 1 次）
+        let filled = 0;
+        for (const it of out) {
+          if (it.placeEn !== undefined && it.placeEn !== null) continue;
+          if (filled >= 4) break;
+          const en = await reverseGeocodeEn(it.lat, it.lng);
+          filled++;
+          if (en) {
+            it.placeEn = en;
+            await checkinsCol(tripId).doc(it.id).update({ placeEn: en });
           }
         }
         res.json({ items: out.map(toJson), cursor: cursor ? cursor.toISOString() : null, exhausted });

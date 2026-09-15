@@ -17,13 +17,13 @@ interface NominatimAddress {
   country?: string;
 }
 
-export async function reverseGeocode(lat: number, lng: number): Promise<string | null> {
+export async function reverseGeocode(lat: number, lng: number, lang = 'zh-TW,zh,en'): Promise<string | null> {
   const url = new URL('https://nominatim.openstreetmap.org/reverse');
   url.searchParams.set('format', 'jsonv2');
   url.searchParams.set('lat', String(lat));
   url.searchParams.set('lon', String(lng));
   url.searchParams.set('zoom', '10');
-  url.searchParams.set('accept-language', 'zh-TW,zh,en');
+  url.searchParams.set('accept-language', lang);
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), TIMEOUT_MS);
   try {
@@ -40,4 +40,9 @@ export async function reverseGeocode(lat: number, lng: number): Promise<string |
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** 英文地名（明信片郵戳用）。 */
+export function reverseGeocodeEn(lat: number, lng: number): Promise<string | null> {
+  return reverseGeocode(lat, lng, 'en');
 }

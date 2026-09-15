@@ -229,6 +229,7 @@ export function renderFamilyPage(root: HTMLElement, token: string, tlOpts: Timel
     const url = photoUrl(p.photoId!);
     return `<figure class="slide" data-i="${i}">
       <a href="${url}" target="_blank" rel="noopener"><img src="${url}" alt="" loading="${i < 2 ? 'eager' : 'lazy'}" /></a>
+      <a class="slide-dl" href="${url}" download="${esc((p.place ?? 'photo').split(',')[0].trim().replace(/\s+/g, '_'))}_${p.at.toDate().toISOString().slice(0, 10)}.jpg" aria-label="下載" title="下載這張照片"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg></a>
       <figcaption><span>${p.place ? esc(placeText(p)) : ''}</span><span class="when">${esc(fmtDateTime(p.at.toDate(), p.tz))}</span>${p.note ? `<span class="note">「${esc(p.note)}」</span>` : ''}</figcaption>
     </figure>`;
   };
