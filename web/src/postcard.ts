@@ -2,6 +2,7 @@
  * 照片幻燈片（家人頁用）：隨機輪播有照片的打卡，字幕為地點、打卡當地日期時間與備註，
  * 左右箭頭 5 秒自動隱藏，點照片開全螢幕檢視（X / 下載）。
  */
+import { createLightbox } from './lightbox';
 import { fmtDateTime, tzLabel } from './time';
 
 export interface PostcardPhoto {
@@ -74,7 +75,6 @@ export function slideMarkup(p: PostcardPhoto, photoUrl: (id: string) => string):
 
 const CHEV_L = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 5-7 7 7 7"/></svg>';
 const CHEV_R = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg>';
-const DL_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>';
 
 const NAV_HIDE_MS = 5000;
 
@@ -84,20 +84,10 @@ export function createPostcardDeck(host: HTMLElement, opts: DeckOptions): Postca
     <div class="pc-deck" id="pc-deck">
       <button class="pc-nav pc-nav-prev" type="button" aria-label="上一張">${CHEV_L}</button>
       <button class="pc-nav pc-nav-next" type="button" aria-label="下一張">${CHEV_R}</button>
-    </div>
-    <div class="pc-lightbox" hidden>
-      <img alt="" />
-      <div class="lb-actions">
-        <a class="lb-btn lb-dl" href="#" download aria-label="下載這張照片" title="下載">${DL_ICON}</a>
-        <button class="lb-btn lb-close" type="button" aria-label="關閉">✕</button>
-      </div>
     </div>`;
   const deck = host.querySelector<HTMLElement>('.pc-deck')!;
   const prevBtn = host.querySelector<HTMLButtonElement>('.pc-nav-prev')!;
   const nextBtn = host.querySelector<HTMLButtonElement>('.pc-nav-next')!;
-  const lightbox = host.querySelector<HTMLElement>('.pc-lightbox')!;
-  const lbImg = lightbox.querySelector<HTMLImageElement>('img')!;
-  const lbDl = lightbox.querySelector<HTMLAnchorElement>('.lb-dl')!;
 
   const photos: PostcardPhoto[] = [];
   const known = new Set<string>();
@@ -116,27 +106,12 @@ export function createPostcardDeck(host: HTMLElement, opts: DeckOptions): Postca
     navTimer = window.setTimeout(() => deck.classList.add('nav-hidden'), NAV_HIDE_MS);
   };
 
-  // ---- 全螢幕檢視 ----
+  // ---- 全螢幕檢視（共用元件）----
+  const lightbox = createLightbox({ onToggle: (open) => (viewing = open) });
   const openViewer = (): void => {
     if (!current) return;
-    lbImg.src = opts.photoUrl(current.photoId);
-    lbDl.href = opts.photoUrl(current.photoId);
-    lbDl.setAttribute('download', postcardFileName(current));
-    lightbox.hidden = false;
-    document.body.style.overflow = 'hidden';
-    viewing = true;
+    lightbox.open([{ src: opts.photoUrl(current.photoId), download: postcardFileName(current) }]);
   };
-  const closeViewer = (): void => {
-    lightbox.hidden = true;
-    document.body.style.overflow = '';
-    viewing = false;
-    lbImg.removeAttribute('src');
-  };
-  lightbox.querySelector('.lb-close')!.addEventListener('click', closeViewer);
-  lightbox.addEventListener('click', (e) => {
-    if ((e.target as HTMLElement).closest('.lb-actions')) return;
-    closeViewer();
-  });
 
   const preload = (p: PostcardPhoto | undefined): void => {
     if (p) new Image().src = opts.photoUrl(p.photoId);
@@ -230,10 +205,6 @@ export function createPostcardDeck(host: HTMLElement, opts: DeckOptions): Postca
     { passive: true },
   );
   const onKey = (e: KeyboardEvent): void => {
-    if (e.key === 'Escape' && viewing) {
-      closeViewer();
-      return;
-    }
     if (viewing) return;
     if (e.key === 'ArrowRight') next(true);
     else if (e.key === 'ArrowLeft') back();
@@ -268,7 +239,7 @@ export function createPostcardDeck(host: HTMLElement, opts: DeckOptions): Postca
       if (timer) window.clearInterval(timer);
       if (navTimer) window.clearTimeout(navTimer);
       document.removeEventListener('keydown', onKey);
-      if (viewing) closeViewer();
+      lightbox.destroy();
     },
   };
 }

@@ -53,6 +53,8 @@ export interface Trip {
   groupReadToken: string;
   /** 免登入打卡頁 /c/{token} 的能力型 token；可輪替。舊資料可能沒有，讀取時補上。 */
   checkinToken?: string | null;
+  /** 照片回顧頁 /p/{token} 的能力型 token（只能看這趟的照片）；可輪替。舊資料可能沒有，讀取時補上。 */
+  photoToken?: string | null;
   readTokens: string[];
   createdAt: Timestamp;
   updatedAt: Timestamp;

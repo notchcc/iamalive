@@ -2,12 +2,13 @@
  * 依頁面切換「加入主畫面」會用到的身分：manifest、apple-touch-icon、標題、主題色。
  * iOS Safari 在按「加入主畫面」當下讀取 DOM 裡的這些標籤，所以動態替換有效。
  */
-export type PwaKind = 'default' | 'checkin' | 'family';
+export type PwaKind = 'default' | 'checkin' | 'family' | 'photos';
 
 const IDENTITY: Record<PwaKind, { manifest: string; icon: string; title: string; theme: string }> = {
   default: { manifest: '/manifest.webmanifest', icon: 'icon', title: '報平安', theme: '#0f766e' },
   checkin: { manifest: '/manifest-checkin.webmanifest', icon: 'checkin', title: '打卡', theme: '#0f766e' },
   family: { manifest: '/manifest-family.webmanifest', icon: 'family', title: '家人頁', theme: '#d97706' },
+  photos: { manifest: '/manifest-photos.webmanifest', icon: 'photos', title: '照片回顧', theme: '#7c3aed' },
 };
 
 function setLink(rel: string, href: string, sizes?: string): void {

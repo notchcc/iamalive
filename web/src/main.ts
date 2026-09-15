@@ -2,6 +2,7 @@ import './style.css';
 import { renderFamilyPage } from './family';
 import { renderMePage } from './me';
 import { renderCheckinPage } from './checkin-page';
+import { renderPhotosPage } from './photos';
 import { renderGoPage, type GoTarget } from './go';
 import { getLiff } from './liff';
 
@@ -18,6 +19,8 @@ function route(): void {
     renderGoPage(root, path.slice('/me/go/'.length) as GoTarget);
   } else if (path.match(/^\/c\/([A-Za-z0-9_-]{16,64})$/)) {
     renderCheckinPage(root, path.slice(3));
+  } else if (path.match(/^\/p\/([A-Za-z0-9_-]{16,64})$/)) {
+    renderPhotosPage(root, path.slice(3));
   } else {
     root.innerHTML = `
     <div class="page landing">

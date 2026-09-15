@@ -260,6 +260,32 @@ details.extras summary .muted { color: var(--text); font-size: 13px; min-width: 
 .lb-actions { position: fixed; top: calc(12px + env(safe-area-inset-top)); right: 14px; display: flex; gap: 10px; }
 .lb-btn { width: 40px; height: 40px; border-radius: 999px; background: rgba(255,255,255,0.14); border: 1px solid rgba(255,255,255,0.3); color: #fff; display: inline-flex; align-items: center; justify-content: center; font-size: 16px; padding: 0; text-decoration: none; backdrop-filter: blur(4px); }
 .lb-btn svg { width: 20px; height: 20px; }
+.lb-btn[hidden] { display: none; }
+.lb-foot { position: fixed; left: 14px; right: 14px; bottom: calc(14px + env(safe-area-inset-bottom)); display: flex; justify-content: space-between; gap: 12px; color: rgba(255,255,255,0.85); font-size: 13px; pointer-events: none; text-shadow: 0 1px 3px rgba(0,0,0,0.6); }
+.lb-foot .lb-cap { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lb-foot .lb-count { font-variant-numeric: tabular-nums; flex-shrink: 0; }
+
+/* ===== 照片回顧頁 /p/{token} ===== */
+.ph-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 4px 0 12px; }
+.ph-title { font-size: 20px; margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 999px; padding: 2px; background: var(--card); flex-shrink: 0; }
+.seg button { border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 13px; font-weight: 600; padding: 6px 14px; border-radius: 999px; cursor: pointer; }
+.seg button.on { background: #7c3aed; color: #fff; }
+.ph-grid-wrap[hidden], .ph-map-wrap[hidden] { display: none; }
+.ph-empty { text-align: center; padding: 40px 0; line-height: 1.8; }
+.ph-day { margin-bottom: 14px; }
+.ph-day-h { display: flex; align-items: baseline; gap: 8px; font-size: 15px; margin: 0 0 6px; position: sticky; top: 0; background: var(--bg); padding: 6px 0 4px; z-index: 2; }
+.ph-day-h .muted { font-size: 13px; font-weight: 400; }
+.ph-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 2px; }
+@media (min-width: 700px) { .ph-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 3px; } }
+.ph-cell { position: relative; aspect-ratio: 1; padding: 0; border: 0; background: #e5e7eb; overflow: hidden; cursor: zoom-in; border-radius: 2px; }
+.ph-cell img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.ph-map { height: calc(100dvh - 150px); min-height: 360px; border-radius: 14px; overflow: hidden; border: 1px solid var(--line); background: #e5e7eb; }
+.ph-pin-wrap { background: none; border: 0; }
+.ph-pin { position: relative; width: 56px; height: 56px; border-radius: 12px; border: 3px solid #fff; box-shadow: 0 4px 12px rgba(0,0,0,0.35); overflow: hidden; background: #ddd; cursor: pointer; }
+.ph-pin::after { content: ''; position: absolute; left: 50%; bottom: -9px; width: 12px; height: 12px; background: #fff; transform: translateX(-50%) rotate(45deg); }
+.ph-pin img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.ph-pin .n { position: absolute; top: -2px; right: -2px; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: #7c3aed; color: #fff; font-size: 12px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 1px 3px rgba(0,0,0,0.3); }
 
 /* 家人頁地圖：跟著明信片飛時顯示「顯示全部打卡點」 */
 .map-wrap { position: relative; }

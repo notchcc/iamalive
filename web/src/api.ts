@@ -65,6 +65,7 @@ export const api = {
   liffLogin: (idToken: string) => call<{ ok: true; uid: string }>('POST', '/auth/liff', { idToken }),
   rotateCheckinToken: (id: string) =>
     call<{ ok: true; checkinToken: string; checkinUrl: string }>('POST', `/trips/${id}/checkin-token/rotate`),
+  rotatePhotoToken: (id: string) => call<{ ok: true; photoToken: string; photosUrl: string }>('POST', `/trips/${id}/photo-token/rotate`),
   /** 免登入打卡頁（/c/{token}）。 */
   checkinPage: {
     get: (token: string) => call<CheckinPageJson>('GET', `/c/${encodeURIComponent(token)}`),

@@ -273,6 +273,60 @@ async function main() {
     assert.equal(view.recent[0].photoId, j0.photoId, 'back to the first photo as newest');
     log('photo checkin + photo serving ok');
 
+    // ---- 照片回顧頁 /p/{photoToken}：獨立 token、只回有照片的、縮圖 ?s=t ----
+    assert.ok(trip.photoToken && trip.photosUrl.endsWith(`/p/${trip.photoToken}`), 'trip has photo token');
+    let g = await fetch(`${BASE}/g/${trip.photoToken}`);
+    assert.equal(g.status, 200);
+    let gj = await g.json();
+    assert.equal(gj.title, trip.title);
+    assert.equal(gj.photoToken, undefined, 'photo page json must not leak tokens');
+    g = await fetch(`${BASE}/g/${trip.photoToken}/photos`);
+    assert.equal(g.status, 200);
+    gj = await g.json();
+    assert.ok(Array.isArray(gj.items) && gj.items.every((x) => x.photoId) && gj.items.some((x) => x.photoId === j0.photoId), 'photos-only list');
+    assert.equal(typeof gj.exhausted, 'boolean');
+    g = await fetch(`${BASE}/g/${trip.photoToken}/p/${j0.photoId}`);
+    assert.equal(g.status, 200);
+    assert.equal((await g.arrayBuffer()).byteLength, jpeg.length, 'original via photo token');
+    g = await fetch(`${BASE}/g/${trip.photoToken}/p/${j0.photoId}?s=t`);
+    assert.equal(g.status, 200);
+    assert.equal((await g.arrayBuffer()).byteLength, jpeg.length, 'no thumb → falls back to original');
+    // 帶縮圖上傳（回填 3 小時前，不動最後回報），?s=t 取到縮圖；刪除後縮圖也消失
+    const fdT = new FormData();
+    fdT.append('lat', '46.6863');
+    fdT.append('lng', '7.8632');
+    fdT.append('takenAt', new Date(Date.now() - 3 * H).toISOString());
+    fdT.append('useTakenAt', '1');
+    fdT.append('photo', new Blob([jpeg], { type: 'image/jpeg' }), 'p.jpg');
+    const thumbBytes = Buffer.from('thumb-bytes');
+    fdT.append('thumb', new Blob([thumbBytes], { type: 'image/jpeg' }), 't.jpg');
+    const rT = await fetch(`${BASE}/checkin/photo`, { method: 'POST', headers: authHeaders(), body: fdT });
+    const jT = await rT.json();
+    assert.equal(rT.status, 200, JSON.stringify(jT));
+    g = await fetch(`${BASE}/g/${trip.photoToken}/p/${jT.photoId}?s=t`);
+    assert.equal(g.status, 200);
+    assert.equal((await g.arrayBuffer()).byteLength, thumbBytes.length, 'thumb served for ?s=t');
+    g = await fetch(`${BASE}/p/${trip.groupReadToken}/${jT.photoId}?s=t`);
+    assert.equal((await g.arrayBuffer()).byteLength, thumbBytes.length, 'thumb via family token too');
+    g = await fetch(`${BASE}/g/${trip.photoToken}/p/${jT.photoId}`);
+    assert.equal((await g.arrayBuffer()).byteLength, jpeg.length, 'original untouched');
+    view = (await db.doc(`views/${trip.groupReadToken}`).get()).data();
+    assert.equal(view.recent[0].photoId, j0.photoId, 'backdated thumb upload is not the newest');
+    const tItem = view.recent.find((x) => x.photoId === jT.photoId);
+    assert.ok(tItem, 'thumb upload in recent');
+    assert.equal((await call('DELETE', `/trips/${trip.id}/checkins/${tItem.id}`)).status, 200);
+    assert.equal((await fetch(`${BASE}/g/${trip.photoToken}/p/${jT.photoId}?s=t`)).status, 404, 'thumb deleted with the photo');
+    assert.equal((await fetch(`${BASE}/g/nottherighttoken_0000`)).status, 404);
+    assert.equal((await fetch(`${BASE}/g/short/photos`)).status, 404);
+    const rot = await call('POST', `/trips/${trip.id}/photo-token/rotate`);
+    assert.equal(rot.status, 200);
+    assert.notEqual(rot.json.photoToken, trip.photoToken);
+    assert.equal((await fetch(`${BASE}/g/${trip.photoToken}`)).status, 404, 'old photo token dead after rotate');
+    assert.equal((await fetch(`${BASE}/g/${rot.json.photoToken}`)).status, 200);
+    trip.photoToken = rot.json.photoToken;
+    view = (await db.doc(`views/${trip.groupReadToken}`).get()).data();
+    log('photo page token + photos list + thumbs ok');
+
     // 刪除該筆打卡：紀錄消失、照片 404、view 更新、最後回報退回前一筆、期限不變
     const before = (await db.doc(`trips/${trip.id}`).get()).data();
     const delRes = await call('DELETE', `/trips/${trip.id}/checkins/${view.recent[0].id}`);

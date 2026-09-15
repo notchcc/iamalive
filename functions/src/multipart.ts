@@ -4,9 +4,18 @@
 import Busboy from 'busboy';
 import type { Request } from 'express';
 
+export interface ParsedFile {
+  field: string;
+  filename: string;
+  mimeType: string;
+  data: Buffer;
+}
 export interface ParsedMultipart {
   fields: Record<string, string>;
-  file: { field: string; filename: string; mimeType: string; data: Buffer } | null;
+  /** 主檔案（欄位 photo；沒有指名就取第一個檔案） */
+  file: ParsedFile | null;
+  /** 選配縮圖（欄位 thumb） */
+  thumb: ParsedFile | null;
 }
 
 export function parseMultipart(req: Request, maxFileBytes: number): Promise<ParsedMultipart> {
@@ -16,8 +25,8 @@ export function parseMultipart(req: Request, maxFileBytes: number): Promise<Pars
       reject(new Error('NO_RAW_BODY'));
       return;
     }
-    const bb = Busboy({ headers: req.headers, limits: { files: 1, fileSize: maxFileBytes, fields: 20, fieldSize: 4096 } });
-    const out: ParsedMultipart = { fields: {}, file: null };
+    const bb = Busboy({ headers: req.headers, limits: { files: 2, fileSize: maxFileBytes, fields: 20, fieldSize: 4096 } });
+    const out: ParsedMultipart = { fields: {}, file: null, thumb: null };
     let tooLarge = false;
 
     bb.on('field', (name, val) => {
@@ -30,7 +39,9 @@ export function parseMultipart(req: Request, maxFileBytes: number): Promise<Pars
         tooLarge = true;
       });
       stream.on('end', () => {
-        out.file = { field, filename: info.filename, mimeType: info.mimeType, data: Buffer.concat(chunks) };
+        const f = { field, filename: info.filename, mimeType: info.mimeType, data: Buffer.concat(chunks) };
+        if (field === 'thumb') out.thumb = f;
+        else if (!out.file || field === 'photo') out.file = f;
       });
     });
     bb.on('error', reject);

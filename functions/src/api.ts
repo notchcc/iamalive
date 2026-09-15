@@ -6,7 +6,7 @@ import { randomInt } from 'node:crypto';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { logger } from 'firebase-functions/v2';
 import { z } from 'zod';
-import { checkinUrl, familyUrl } from './config.js';
+import { checkinUrl, familyUrl, photosUrl } from './config.js';
 import { Timestamp, bindCodesCol, getLineConfig, groupIdForOwner, groupsCol, tripsCol, usersCol } from './db.js';
 import { MONTHLY_QUOTA } from './line.js';
 import {
@@ -45,6 +45,9 @@ import {
   ensureCheckinToken,
   rotateCheckinToken,
   getTripByCheckinToken,
+  ensurePhotoToken,
+  rotatePhotoToken,
+  getTripByPhotoToken,
 } from './trips.js';
 import { TAIPEI, fmtBoth, fmtDateTime, fmtHours, isValidTz, monthKey, tzLabel, zonedToUtc } from './time.js';
 import { currentFlight, sleepOf, tripDeadline } from './overdue-logic.js';
@@ -52,8 +55,8 @@ import { buildForecast } from './forecast.js';
 import type { FlightSegment } from './types.js';
 import { parseMultipart } from './multipart.js';
 import { lookupFlight } from './flights-api.js';
-import { MAX_PHOTO_BYTES, isAllowedImage, readPhoto, savePhoto } from './photos.js';
-import { checkinsCol, viewsCol } from './db.js';
+import { MAX_PHOTO_BYTES, MAX_THUMB_BYTES, isAllowedImage, readPhoto, savePhoto, saveThumb, type PhotoVariant } from './photos.js';
+import { checkinsCol, viewsCol, type TripSnap } from './db.js';
 import { reverseGeocodeEn } from './geocode.js';
 
 const isoDate = z
@@ -177,6 +180,8 @@ function tripJson(id: string, t: FirebaseFirestore.DocumentData) {
     familyUrl: familyUrl(t.groupReadToken),
     checkinToken: t.checkinToken ?? null,
     checkinUrl: t.checkinToken ? checkinUrl(t.checkinToken) : null,
+    photoToken: t.photoToken ?? null,
+    photosUrl: t.photoToken ? photosUrl(t.photoToken) : null,
     sleep: sleepOf(t as { sleep?: import('./types.js').SleepWindow | null }),
     effectiveDeadlineAt: tripDeadline(t as Parameters<typeof tripDeadline>[0]).at.toISOString(),
     deadlineShift: tripDeadline(t as Parameters<typeof tripDeadline>[0]).kind,
@@ -231,6 +236,10 @@ async function photoCheckin(req: Request, trip: ActiveTripSnap) {
   if (!isAllowedImage(parsed.file.mimeType)) throw new HttpError(415, 'UNSUPPORTED_IMAGE_TYPE');
   const f = PhotoFieldsSchema.parse(parsed.fields);
   const photoId = await savePhoto(trip.id, parsed.file.data, parsed.file.mimeType);
+  // 選配縮圖（前端一併產生）：太大或型別不對就略過，回顧頁會退回原圖
+  if (parsed.thumb && parsed.thumb.data.length > 0 && parsed.thumb.data.length <= MAX_THUMB_BYTES && isAllowedImage(parsed.thumb.mimeType)) {
+    await saveThumb(trip.id, photoId, parsed.thumb.data, parsed.thumb.mimeType);
+  }
   const result = await recordCheckin(trip, {
     lat: f.lat,
     lng: f.lng,
@@ -278,6 +287,80 @@ async function requireTripByCheckinToken(token: string): Promise<ActiveTripSnap>
   if (!snap) throw new HttpError(404, 'TRIP_NOT_FOUND');
   if (snap.data().status !== 'active') throw new HttpError(410, 'TRIP_ENDED');
   return snap as ActiveTripSnap;
+}
+
+/** 照片回顧頁 token：結案後仍可看。 */
+async function requireTripByPhotoToken(token: string): Promise<TripSnap> {
+  if (!CHECKIN_TOKEN_RE.test(token)) throw new HttpError(404, 'TRIP_NOT_FOUND');
+  const snap = await getTripByPhotoToken(token);
+  if (!snap) throw new HttpError(404, 'TRIP_NOT_FOUND');
+  return snap;
+}
+
+function recentItemJson(it: import('./types.js').RecentItem) {
+  return {
+    id: it.id,
+    lat: it.lat,
+    lng: it.lng,
+    acc: it.acc,
+    src: it.src,
+    tz: it.tz,
+    place: it.place ?? null,
+    placeEn: it.placeEn ?? null,
+    note: it.note,
+    photoId: it.photoId ?? null,
+    takenAt: it.takenAt ? it.takenAt.toDate().toISOString() : null,
+    at: it.at.toDate().toISOString(),
+  };
+}
+
+/**
+ * 只取有照片的打卡：最多掃 10 頁 × 25 筆，湊滿 limit 或掃完為止；回傳掃描游標讓前端續抓。
+ * 舊照片沒有英文地名：每次最多補 2 筆並寫回（Nominatim 每秒 1 次）。
+ */
+async function photoPage(tripId: string, before: Date | null, limit: number) {
+  const out: import('./types.js').RecentItem[] = [];
+  let cursor: Date | null = before;
+  let exhausted = false;
+  for (let i = 0; i < 10 && out.length < limit; i++) {
+    const page = await checkinsPage(tripId, cursor, 25);
+    if (!page.length) {
+      exhausted = true;
+      break;
+    }
+    for (const it of page) if (it.photoId && out.length < limit) out.push(it);
+    cursor = page[page.length - 1].at.toDate();
+    if (page.length < 25) {
+      exhausted = true;
+      break;
+    }
+  }
+  let filled = 0;
+  for (const it of out) {
+    if (it.placeEn !== undefined && it.placeEn !== null) continue;
+    if (filled >= 2) break;
+    const en = await reverseGeocodeEn(it.lat, it.lng);
+    filled++;
+    if (en) {
+      it.placeEn = en;
+      await checkinsCol(tripId).doc(it.id).update({ placeEn: en });
+    }
+  }
+  return { items: out.map(recentItemJson), cursor: cursor ? cursor.toISOString() : null, exhausted };
+}
+
+/** 串流一張照片；`?s=t` 取縮圖（沒有就退回原圖）。 */
+async function sendPhoto(req: Request, res: Response, tripId: string, photoId: string): Promise<void> {
+  const variant: PhotoVariant = req.query.s === 't' ? 'thumb' : 'orig';
+  const photo = await readPhoto(tripId, photoId, variant);
+  if (!photo) {
+    res.status(404).end();
+    return;
+  }
+  res.setHeader('Content-Type', photo.contentType);
+  res.setHeader('Cache-Control', 'private, max-age=86400');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.end(photo.data);
 }
 
 /** 同站檢查（cookie 相關的公開端點用）。 */
@@ -415,69 +498,12 @@ export function createApp(): express.Express {
       if (!tripId) throw new HttpError(404, 'NOT_FOUND');
       const q = z.object({ before: isoDate.optional(), limit: z.coerce.number().int().min(1).max(50).default(10), photos: z.enum(['1']).optional() }).parse(req.query);
       res.setHeader('Cache-Control', 'no-store');
-      const toJson = (it: import('./types.js').RecentItem) => ({
-        id: it.id,
-        lat: it.lat,
-        lng: it.lng,
-        acc: it.acc,
-        src: it.src,
-        tz: it.tz,
-        place: it.place ?? null,
-        placeEn: it.placeEn ?? null,
-        note: it.note,
-        photoId: it.photoId ?? null,
-        takenAt: it.takenAt ? it.takenAt.toDate().toISOString() : null,
-        at: it.at.toDate().toISOString(),
-      });
       if (q.photos) {
-        // 只要有照片的：最多掃 10 頁 × 25 筆，湊滿 limit 或掃完為止；回傳掃描游標讓前端續抓
-        const out: import('./types.js').RecentItem[] = [];
-        let cursor: Date | null = q.before ? new Date(q.before) : null;
-        let exhausted = false;
-        for (let i = 0; i < 10 && out.length < q.limit; i++) {
-          const page = await checkinsPage(tripId, cursor, 25);
-          if (!page.length) {
-            exhausted = true;
-            break;
-          }
-          for (const it of page) if (it.photoId && out.length < q.limit) out.push(it);
-          cursor = page[page.length - 1].at.toDate();
-          if (page.length < 25) {
-            exhausted = true;
-            break;
-          }
-        }
-        // 舊照片沒有英文地名：每次最多補 4 筆並寫回（Nominatim 每秒 1 次）
-        let filled = 0;
-        for (const it of out) {
-          if (it.placeEn !== undefined && it.placeEn !== null) continue;
-          if (filled >= 2) break;
-          const en = await reverseGeocodeEn(it.lat, it.lng);
-          filled++;
-          if (en) {
-            it.placeEn = en;
-            await checkinsCol(tripId).doc(it.id).update({ placeEn: en });
-          }
-        }
-        res.json({ items: out.map(toJson), cursor: cursor ? cursor.toISOString() : null, exhausted });
+        res.json(await photoPage(tripId, q.before ? new Date(q.before) : null, q.limit));
         return;
       }
       const items = await checkinsPage(tripId, q.before ? new Date(q.before) : null, q.limit);
-      res.json(
-        items.map((it) => ({
-          id: it.id,
-          lat: it.lat,
-          lng: it.lng,
-          acc: it.acc,
-          src: it.src,
-          tz: it.tz,
-          place: it.place ?? null,
-          note: it.note,
-          photoId: it.photoId ?? null,
-          takenAt: it.takenAt ? it.takenAt.toDate().toISOString() : null,
-          at: it.at.toDate().toISOString(),
-        })),
-      );
+      res.json(items.map(recentItemJson));
     }),
   );
 
@@ -495,15 +521,34 @@ export function createApp(): express.Express {
         res.status(404).end();
         return;
       }
-      const photo = await readPhoto(tripId, String(req.params.photoId));
-      if (!photo) {
-        res.status(404).end();
-        return;
-      }
-      res.setHeader('Content-Type', photo.contentType);
-      res.setHeader('Cache-Control', 'private, max-age=86400');
-      res.setHeader('X-Content-Type-Options', 'nosniff');
-      res.end(photo.data);
+      await sendPhoto(req, res, tripId, String(req.params.photoId));
+    }),
+  );
+
+  // ---------- 照片回顧頁 /p/{photoToken}（能力型 token，只能看這趟的照片；結案後仍可看） ----------
+  r.get(
+    '/g/:token',
+    wrap(async (req, res) => {
+      res.setHeader('Cache-Control', 'no-store');
+      const snap = await requireTripByPhotoToken(req.params.token);
+      const t = snap.data();
+      res.json({ title: t.title, status: t.status, startAt: t.startAt.toDate().toISOString(), endAt: t.endAt.toDate().toISOString(), travelerTz: t.travelerTz });
+    }),
+  );
+  r.get(
+    '/g/:token/photos',
+    wrap(async (req, res) => {
+      res.setHeader('Cache-Control', 'no-store');
+      const snap = await requireTripByPhotoToken(req.params.token);
+      const q = z.object({ before: isoDate.optional(), limit: z.coerce.number().int().min(1).max(50).default(50) }).parse(req.query);
+      res.json(await photoPage(snap.id, q.before ?? null, q.limit));
+    }),
+  );
+  r.get(
+    '/g/:token/p/:photoId',
+    wrap(async (req, res) => {
+      const snap = await requireTripByPhotoToken(req.params.token);
+      await sendPhoto(req, res, snap.id, String(req.params.photoId));
     }),
   );
 
@@ -640,13 +685,14 @@ export function createApp(): express.Express {
       const key = monthKey(new Date());
       const auth = res.locals.auth as AuthInfo;
       const checkinToken = active ? await ensureCheckinToken(active) : null;
+      const photoToken = active ? await ensurePhotoToken(active) : null;
       res.json({
         user: { uid, kind: auth.kind, displayName: user.data()?.displayName ?? null, pictureUrl: user.data()?.pictureUrl ?? null },
         groupBound: Boolean(groupId),
         monthKey: key,
         pushCount: cfg.monthKey === key ? cfg.pushCount : 0,
         monthlyQuota: MONTHLY_QUOTA,
-        activeTrip: active ? tripJson(active.id, { ...active.data(), checkinToken }) : null,
+        activeTrip: active ? tripJson(active.id, { ...active.data(), checkinToken, photoToken }) : null,
       });
     }),
   );
@@ -778,6 +824,16 @@ export function createApp(): express.Express {
       const trip = await requireTrip(uidOf(res), req.params.id);
       const token = await rotateCheckinToken(trip);
       res.json({ ok: true, checkinToken: token, checkinUrl: checkinUrl(token) });
+    }),
+  );
+
+  /** 輪替照片回顧頁 token：舊連結立即失效。 */
+  r.post(
+    '/trips/:id/photo-token/rotate',
+    wrap(async (req, res) => {
+      const trip = await requireTrip(uidOf(res), req.params.id);
+      const token = await rotatePhotoToken(trip);
+      res.json({ ok: true, photoToken: token, photosUrl: photosUrl(token) });
     }),
   );
 

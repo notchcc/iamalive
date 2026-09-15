@@ -40,6 +40,12 @@ export function checkinUrl(token: string): string {
   return `${base}/c/${token}`;
 }
 
+/** 照片回顧頁（網格 / 地圖檢視，獨立 token）。 */
+export function photosUrl(token: string): string {
+  const base = PUBLIC_BASE_URL.value().replace(/\/+$/, '');
+  return `${base}/p/${token}`;
+}
+
 /** LIFF app ID（LINE Login channel 底下、endpoint 為 /me）。空字串表示未設定。 */
 export const LIFF_ID = defineString('LIFF_ID', { default: '' });
 

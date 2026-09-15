@@ -1,0 +1,21 @@
+{
+  "name": "報平安 照片回顧",
+  "short_name": "照片回顧",
+  "display": "standalone",
+  "background_color": "#f6f7f8",
+  "theme_color": "#7c3aed",
+  "lang": "zh-Hant",
+  "icons": [
+    {
+      "src": "/icons/photos-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icons/photos-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

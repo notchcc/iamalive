@@ -340,6 +340,9 @@ export function renderCheckinPage(root: HTMLElement, token: string): () => void 
       if (backdate) fd.append('useTakenAt', '1');
       fd.append('clientAt', x.clientAt);
       fd.append('photo', blob, type === 'image/jpeg' ? 'photo.jpg' : photoState.file.name || 'photo');
+      // 照片回顧頁網格 / 地圖用的縮圖（~400px）；產不出來就略過，伺服器會退回原圖
+      const thumb = await shrinkImage(photoState.file, 400, 0.72);
+      if (thumb.resized) fd.append('thumb', thumb.blob, 'thumb.jpg');
       const r = await api.checkinPage.photo(token, fd);
       afterCheckin(r.nextDeadlineAt, r.tz, backdate ? `已用照片打卡（打卡時間 ${fmtBoth(photoState.takenAt!, r.tz)}）` : '已用照片打卡');
     } catch (e) {

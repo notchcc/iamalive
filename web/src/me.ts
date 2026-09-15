@@ -255,6 +255,13 @@ export function renderMePage(root: HTMLElement): () => void {
       </section>
 
       <section class="card">
+        <h2>照片回顧頁 <span class="muted">這趟的照片，網格 / 地圖檢視</span></h2>
+        <div class="row"><input id="photos-url" readonly value="${esc(t.photosUrl ?? '')}" /><button id="copy-photos-url" class="secondary" type="button">複製</button><a class="btn-link" href="${esc(t.photosUrl ?? '#')}" target="_blank" rel="noopener">開啟</a></div>
+        <p class="muted small">獨立連結，只能看這趟的照片，看不到狀態與位置紀錄；行程結束後仍可看。外洩就按輪替。</p>
+        <button id="rotate-photos" class="danger" type="button">輪替連結（舊連結失效）</button>
+      </section>
+
+      <section class="card">
         <h2>家人頁連結 <span class="muted">群組訊息內附的同一條</span></h2>
         <div class="row"><input id="family-url" readonly value="${esc(t.familyUrl)}" /><button id="copy-family-url" class="secondary" type="button">複製</button><a class="btn-link" href="${esc(t.familyUrl)}" target="_blank" rel="noopener">開啟</a></div>
         <p class="muted small">持有連結者可看地圖與時間軸。要收回請結束行程，下一趟會有新連結。</p>
@@ -644,6 +651,24 @@ export function renderMePage(root: HTMLElement): () => void {
         toast('已複製');
       } catch {
         toast('無法複製，請手動選取', 'err');
+      }
+    });
+    root.querySelector('#copy-photos-url')!.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(t.photosUrl ?? '');
+        toast('已複製');
+      } catch {
+        toast('無法複製，請手動選取', 'err');
+      }
+    });
+    root.querySelector('#rotate-photos')!.addEventListener('click', async () => {
+      if (!confirm('輪替照片回顧頁連結？已分享出去的舊連結會失效。')) return;
+      try {
+        await api.rotatePhotoToken(t.id);
+        toast('已產生新連結');
+        await load();
+      } catch (err) {
+        toast(errText(err), 'err');
       }
     });
     root.querySelector('#rotate-checkin')!.addEventListener('click', async () => {

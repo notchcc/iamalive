@@ -554,6 +554,17 @@ export const checkOverdue = onSchedule(
 - **航段資訊併入狀態卡**：有航段時右上角出現「✈ N 段」按鈕（與「📍 地點」鈕並排）（沒有航段就不顯示），點一下在卡片底部展開 / 收合航段面板（預設收合，重繪不會重置開合狀態）。面板第一行為摘要（段數與「飛行中 XX」或「下一段 XX 起飛時間」或「全部已降落」），其下為各段列表與說明。
 - 時間軸預設只渲染 10 筆；底部哨兵進入視窗（IntersectionObserver）就再顯示 10 筆。`recent`（最多 100 筆、即時）用完後改呼叫 `GET /api/w/{token}/checkins?before=…` 取更舊的紀錄，直到回傳不足 10 筆為止。
 
+### 8.1.3 照片回顧頁 `/p/{photoToken}`
+
+- 每趟行程一個**獨立的能力型 token**（`photoToken`，建立行程時產生，舊行程於管理頁載入時補上；可在參數設定輪替），只能看這趟的照片與拍攝地點，看不到狀態、期限與非照片的位置紀錄；行程結束後仍可看。管理頁「參數設定」有連結的複製 / 開啟 / 輪替。
+- API（皆免登入、`Cache-Control: no-store`）：`GET /api/g/{token}` 行程名稱與起迄；`GET /api/g/{token}/photos?limit=50&before=…` 只回有照片的打卡（新到舊，附掃描游標與 `exhausted`，與家人頁 `photos=1` 同一套邏輯）；`GET /api/g/{token}/p/{photoId}` 取圖，`?s=t` 取縮圖（沒有縮圖就退回原圖）。`POST /api/trips/{id}/photo-token/rotate` 輪替。
+- **縮圖**：打卡頁上傳照片時前端同時產生 ~400px JPEG（欄位 `thumb`，上限 512KB），伺服器存成 `photos/{tripId}/{photoId}-t`；刪除打卡時一併刪除。捷徑 / 舊照片沒有縮圖，`?s=t` 退回原圖。家人頁的 `/api/p/{readToken}/{photoId}?s=t` 同樣支援。
+- 頁面：最上方「本頁連結 ▾」（折疊）、行程名稱與「網格 / 地圖」分段切換，**預設網格**（`#map` 記住地圖模式）。
+  - 網格檢視：像手機圖庫，正方形縮圖 `repeat(auto-fill, minmax(96px, 1fr))`（≥700px 為 140px），依裝置寬度自動決定每列張數；按打卡當地日期分組，日期標題（月日、星期、該組第一張的城市）置頂黏住；每頁 50 張，捲到底再載（IntersectionObserver，上限 1000 張）。
+  - 地圖檢視：比照 iPhone 圖庫的地圖，切換時先把整趟載完；照片以 56px 圓角縮圖釘標示，同一畫面 64px 內的合併成一群（縮圖用最新一張，右上角數字為張數），拖曳 / 縮放後重新聚合；點群放大到該群範圍（最大 17 級），已到最大或只有一張則直接開檢視。首次進入框住全部照片。
+  - 兩種模式點照片都進**全螢幕檢視**（與家人頁同一個元件）：右上角 X 與下載（檔名 `英文地名_日期.jpg`），點背景 / Esc 關閉，鎖住捲動；多張時可左右滑動或 ← → 切換，底部左側為地點與當地時間，右側「n / N」。網格從整份清單的該張開始，地圖從該群的第一張開始。
+- PWA 身分：manifest `manifest-photos.webmanifest`、圖示 `photos-*.png`（紫底相片框），主畫面名稱「照片回顧」。Hosting 對 `/p/**` 同樣 `no-store` 與 `Referrer-Policy: same-origin`。
+
 ### 8.2 雙時鐘規則
 
 - 左側固定 `Asia/Taipei`；右側為 `views.travelerTz`，標籤顯示時區的城市名（IANA 最後一段，`Asia/Tokyo` → 「東京」，以對照表翻譯，無對照則顯示原字串）與 UTC 偏移。

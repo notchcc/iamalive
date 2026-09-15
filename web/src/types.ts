@@ -88,6 +88,9 @@ export interface TripJson {
   /** 免登入打卡頁 token / 連結。 */
   checkinToken: string | null;
   checkinUrl: string | null;
+  /** 照片回顧頁 token / 連結。 */
+  photoToken: string | null;
+  photosUrl: string | null;
   flights: FlightJson[];
   /** 睡眠時段（旅人當地 HH:mm），null 為關閉。 */
   sleep: SleepWindow | null;

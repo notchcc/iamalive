@@ -141,6 +141,7 @@ export async function createTrip(ownerUid: string, input: CreateTripInput): Prom
     sleep: { ...DEFAULT_SLEEP },
     groupReadToken,
     checkinToken: newToken(),
+    photoToken: newToken(),
     readTokens: [groupReadToken],
     createdAt: Timestamp.fromDate(now),
     updatedAt: Timestamp.fromDate(now),
@@ -276,6 +277,28 @@ export async function rotateCheckinToken(snap: TripSnap): Promise<string> {
   const token = newToken();
   await snap.ref.update({ checkinToken: token, updatedAt: Timestamp.now() });
   return token;
+}
+
+/** 照片回顧頁 token：舊行程沒有就補上。 */
+export async function ensurePhotoToken(snap: TripSnap): Promise<string> {
+  const cur = snap.data().photoToken;
+  if (cur) return cur;
+  const token = newToken();
+  await snap.ref.update({ photoToken: token, updatedAt: Timestamp.now() });
+  return token;
+}
+
+/** 輪替照片回顧頁 token（舊連結立即失效）。 */
+export async function rotatePhotoToken(snap: TripSnap): Promise<string> {
+  const token = newToken();
+  await snap.ref.update({ photoToken: token, updatedAt: Timestamp.now() });
+  return token;
+}
+
+/** 以照片回顧頁 token 找行程（結案後仍可看）。 */
+export async function getTripByPhotoToken(token: string): Promise<TripSnap | null> {
+  const q = await tripsCol.where('photoToken', '==', token).limit(1).get();
+  return q.empty ? null : (q.docs[0] as TripSnap);
 }
 
 /** 以打卡頁 token 找行程（不限狀態，呼叫端決定已結案怎麼回）。 */
