@@ -3,6 +3,7 @@
  * 家人頁透過 GET /api/p/{readToken}/{photoId} 取圖，伺服器驗證 token 後串流回傳。
  */
 import { randomBytes } from 'node:crypto';
+import type { ServerResponse } from 'node:http';
 import { getStorage } from 'firebase-admin/storage';
 import { PHOTO_BUCKET } from './config.js';
 
@@ -59,6 +60,50 @@ export async function readPhoto(tripId: string, photoId: string, variant: PhotoV
     if (t) return t;
   }
   return tryRead('orig');
+}
+
+/**
+ * 直接把物件串流到 HTTP 回應：一次 GCS 往返（不先 exists / getMetadata）。
+ * 要縮圖但沒有時退回原圖；都沒有回 404。回傳是否有送出圖片。
+ */
+export function streamPhoto(tripId: string, photoId: string, variant: PhotoVariant, res: ServerResponse): Promise<boolean> {
+  if (!/^[A-Za-z0-9_-]{8,32}$/.test(photoId)) {
+    res.statusCode = 404;
+    res.end();
+    return Promise.resolve(false);
+  }
+  return new Promise((resolve) => {
+    const attempt = (v: PhotoVariant): void => {
+      const rs = bucket().file(objectPath(tripId, photoId, v)).createReadStream({ validation: false });
+      let ok = false;
+      rs.on('response', (r: { statusCode?: number; headers: Record<string, string | string[] | undefined> }) => {
+        if ((r.statusCode ?? 200) >= 400) return; // 之後會收到 error
+        ok = true;
+        res.setHeader('Content-Type', String(r.headers['content-type'] ?? 'image/jpeg'));
+        const len = r.headers['content-length'];
+        if (len) res.setHeader('Content-Length', String(len));
+        res.setHeader('Cache-Control', 'private, max-age=604800, immutable');
+        res.setHeader('X-Content-Type-Options', 'nosniff');
+      });
+      rs.on('error', (err: Error & { code?: number }) => {
+        if (ok) {
+          res.end();
+          resolve(false);
+          return;
+        }
+        if (err.code === 404 && v === 'thumb') {
+          attempt('orig');
+          return;
+        }
+        res.statusCode = err.code === 404 ? 404 : 502;
+        res.end();
+        resolve(false);
+      });
+      rs.on('end', () => resolve(ok));
+      rs.pipe(res, { end: true });
+    };
+    attempt(variant);
+  });
 }
 
 /** 刪除照片（含縮圖）；不存在時靜默。 */

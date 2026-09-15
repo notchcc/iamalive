@@ -557,7 +557,7 @@ export const checkOverdue = onSchedule(
 ### 8.1.3 照片回顧頁 `/p/{photoToken}`
 
 - 每趟行程一個**獨立的能力型 token**（`photoToken`，建立行程時產生，舊行程於管理頁載入時補上；可在參數設定輪替），只能看這趟的照片與拍攝地點，看不到狀態、期限與非照片的位置紀錄；行程結束後仍可看。管理頁「參數設定」有連結的複製 / 開啟 / 輪替。
-- API（皆免登入、`Cache-Control: no-store`）：`GET /api/g/{token}` 行程名稱與起迄；`GET /api/g/{token}/photos?limit=50&before=…` 只回有照片的打卡（新到舊，附掃描游標與 `exhausted`，與家人頁 `photos=1` 同一套邏輯）；`GET /api/g/{token}/p/{photoId}` 取圖，`?s=t` 取縮圖（沒有縮圖就退回原圖）。`POST /api/trips/{id}/photo-token/rotate` 輪替。
+- API（皆免登入、`Cache-Control: no-store`）：`GET /api/g/{token}` 行程名稱與起迄；`GET /api/g/{token}/photos?limit=50&before=…` 只回有照片的打卡（新到舊，附掃描游標與 `exhausted`，與家人頁 `photos=1` 同一套邏輯）；`GET /api/g/{token}/p/{photoId}` 取圖，`?s=t` 取縮圖（沒有縮圖就退回原圖）。取圖為單次 GCS 串流（不先查 exists / metadata），`Cache-Control: private, max-age=604800, immutable`；token → tripId 在同一實例快取 60 秒（輪替後舊連結最多再撐 60 秒），家人頁的 `/api/p/` 取圖同樣適用。頁面開啟時行程名稱與第一頁照片並行請求。`POST /api/trips/{id}/photo-token/rotate` 輪替。
 - **縮圖**：打卡頁上傳照片時前端同時產生 ~400px JPEG（欄位 `thumb`，上限 512KB），伺服器存成 `photos/{tripId}/{photoId}-t`；刪除打卡時一併刪除。捷徑 / 舊照片沒有縮圖，`?s=t` 退回原圖。家人頁的 `/api/p/{readToken}/{photoId}?s=t` 同樣支援。
 - 頁面：最上方「本頁連結 ▾」（折疊）、行程名稱與「網格 / 地圖」分段切換，**預設網格**（`#map` 記住地圖模式）。
   - 網格檢視：像手機圖庫，正方形縮圖 `repeat(auto-fill, minmax(96px, 1fr))`（≥700px 為 140px），依裝置寬度自動決定每列張數；按打卡當地日期分組，日期標題（月日、星期、該組第一張的城市）置頂黏住；每頁 50 張，捲到底再載（IntersectionObserver，上限 1000 張）。

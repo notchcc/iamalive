@@ -243,11 +243,16 @@ export function renderPhotosPage(root: HTMLElement, token: string): () => void {
 
   // ---- 啟動 ----
   const boot = async (): Promise<void> => {
-    try {
+    // 行程名稱與第一頁照片同時抓，不要串行等待
+    const meta = (async () => {
       const res = await fetch(`/api/g/${encodeURIComponent(token)}`);
       if (res.status === 404) throw new Error('連結無效或已輪替');
       if (!res.ok) throw new Error(`載入失敗（${res.status}）`);
-      const t = (await res.json()) as { title: string };
+      return (await res.json()) as { title: string };
+    })();
+    const first = loadMore();
+    try {
+      const t = await meta;
       titleEl.textContent = t.title;
       applyPwaIdentity('photos', t.title);
     } catch (e) {
@@ -255,7 +260,7 @@ export function renderPhotosPage(root: HTMLElement, token: string): () => void {
       exhausted = true;
       return;
     }
-    await loadMore();
+    await first;
     renderGrid();
     if (location.hash === '#map') await setMode('map');
   };

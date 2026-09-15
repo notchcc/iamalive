@@ -55,7 +55,7 @@ import { buildForecast } from './forecast.js';
 import type { FlightSegment } from './types.js';
 import { parseMultipart } from './multipart.js';
 import { lookupFlight } from './flights-api.js';
-import { MAX_PHOTO_BYTES, MAX_THUMB_BYTES, isAllowedImage, readPhoto, savePhoto, saveThumb, type PhotoVariant } from './photos.js';
+import { MAX_PHOTO_BYTES, MAX_THUMB_BYTES, isAllowedImage, savePhoto, saveThumb, streamPhoto, type PhotoVariant } from './photos.js';
 import { checkinsCol, viewsCol, type TripSnap } from './db.js';
 import { reverseGeocodeEn } from './geocode.js';
 
@@ -352,15 +352,24 @@ async function photoPage(tripId: string, before: Date | null, limit: number) {
 /** 串流一張照片；`?s=t` 取縮圖（沒有就退回原圖）。 */
 async function sendPhoto(req: Request, res: Response, tripId: string, photoId: string): Promise<void> {
   const variant: PhotoVariant = req.query.s === 't' ? 'thumb' : 'orig';
-  const photo = await readPhoto(tripId, photoId, variant);
-  if (!photo) {
-    res.status(404).end();
-    return;
-  }
-  res.setHeader('Content-Type', photo.contentType);
-  res.setHeader('Cache-Control', 'private, max-age=86400');
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.end(photo.data);
+  await streamPhoto(tripId, photoId, variant, res);
+}
+
+/**
+ * 取圖用的 token → tripId 快取（同一個實例內 60 秒）：一頁網格會連發幾十張圖，
+ * 不必每張都查一次 Firestore。輪替 token 後舊連結最多再撐 60 秒。
+ */
+const TOKEN_TTL_MS = 60_000;
+const tokenTripCache = new Map<string, { tripId: string; exp: number }>();
+async function cachedTripId(kind: 'read' | 'photo', token: string): Promise<string | null> {
+  const key = `${kind}:${token}`;
+  const hit = tokenTripCache.get(key);
+  if (hit && hit.exp > Date.now()) return hit.tripId;
+  let tripId: string | null = null;
+  if (kind === 'read') tripId = (await viewsCol.doc(token).get()).data()?.tripId ?? null;
+  else tripId = (await getTripByPhotoToken(token))?.id ?? null;
+  if (tripId) tokenTripCache.set(key, { tripId, exp: Date.now() + TOKEN_TTL_MS });
+  return tripId;
 }
 
 /** 同站檢查（cookie 相關的公開端點用）。 */
@@ -515,8 +524,7 @@ export function createApp(): express.Express {
         res.status(404).end();
         return;
       }
-      const view = await viewsCol.doc(token).get();
-      const tripId = view.data()?.tripId;
+      const tripId = await cachedTripId('read', token);
       if (!tripId) {
         res.status(404).end();
         return;
@@ -547,8 +555,13 @@ export function createApp(): express.Express {
   r.get(
     '/g/:token/p/:photoId',
     wrap(async (req, res) => {
-      const snap = await requireTripByPhotoToken(req.params.token);
-      await sendPhoto(req, res, snap.id, String(req.params.photoId));
+      const token = String(req.params.token);
+      const tripId = CHECKIN_TOKEN_RE.test(token) ? await cachedTripId('photo', token) : null;
+      if (!tripId) {
+        res.status(404).end();
+        return;
+      }
+      await sendPhoto(req, res, tripId, String(req.params.photoId));
     }),
   );
 
