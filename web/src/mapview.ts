@@ -49,14 +49,24 @@ export function createMap(el: HTMLElement): L.Map {
 
 export class TrackLayer {
   private group = L.layerGroup();
+  private pts: L.LatLngExpression[] = [];
   constructor(private map: L.Map) {
     this.group.addTo(map);
   }
 
+  /** 回到「框住所有已載入的點」的預設視角 */
+  fit(): void {
+    const pts = this.pts;
+    if (!pts.length) return;
+    if (pts.length === 1) this.map.flyTo(pts[0], 14, { duration: 1 });
+    else this.map.flyToBounds(L.latLngBounds(pts).pad(0.2), { maxZoom: 15, duration: 1 });
+  }
+
   render(items: RecentItem[], opts: { fit?: boolean; photoUrl?: PhotoUrlFn } = {}): void {
     this.group.clearLayers();
+    this.pts = [];
     if (!items.length) return;
-    const pts: L.LatLngExpression[] = [];
+    const pts: L.LatLngExpression[] = this.pts;
     // items 為新到舊；畫線用舊到新。
     const ordered = [...items].reverse();
     ordered.forEach((it, i) => {

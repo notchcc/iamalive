@@ -10,6 +10,7 @@ export interface RecentItem {
   src: CheckinSource;
   tz: string;
   place?: string | null;
+  placeEn?: string | null;
   note: string;
   photoId?: string | null;
   takenAt?: Timestamp | null;

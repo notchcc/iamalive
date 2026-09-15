@@ -4,18 +4,14 @@ import { renderMePage } from './me';
 import { renderCheckinPage } from './checkin-page';
 import { renderGoPage, type GoTarget } from './go';
 import { getLiff } from './liff';
-import { renderPostcardsPage } from './postcards';
 
 const root = document.getElementById('app')!;
 
 function route(): void {
   const path = location.pathname.replace(/\/+$/, '') || '/';
   const family = path.match(/^\/w\/([A-Za-z0-9_-]{16,64})$/);
-  const postcards = path.match(/^\/g\/([A-Za-z0-9_-]{16,64})$/);
   if (family) {
     renderFamilyPage(root, family[1]);
-  } else if (postcards) {
-    renderPostcardsPage(root, postcards[1]);
   } else if (path === '/me') {
     renderMePage(root);
   } else if (path.match(/^\/me\/go\/(checkin|family|trip)$/)) {

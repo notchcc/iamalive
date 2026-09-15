@@ -1,10 +1,12 @@
 /**
- * 家人頁 /w/{readToken}：雙時鐘、狀態、地圖、時間軸。onSnapshot 即時更新。
+ * 家人頁 /w/{readToken}：雙時鐘、狀態、明信片牌堆、地圖、時間軸。onSnapshot 即時更新。
  */
 import { Timestamp, doc, onSnapshot } from 'firebase/firestore';
+import L from 'leaflet';
 import { firestore } from './firebase';
 import { currentFlight, effectiveDeadline, toWindows } from './flights';
 import { TrackLayer, createMap, placeText, renderTimeline, type TimelineOpts } from './mapview';
+import { createPostcardDeck, type PostcardDeck, type PostcardPhoto } from './postcard';
 import { renderShareBar } from './share';
 import { applyPwaIdentity } from './pwa';
 import { TAIPEI, fmtAgo, fmtBoth, fmtClock, fmtDate, fmtDateTime, fmtHours, sameAsTaipei, tzLabel, utcOffset } from './time';
@@ -24,9 +26,9 @@ export function renderFamilyPage(root: HTMLElement, token: string, tlOpts: Timel
       <div id="share"></div>
       <header class="clocks" id="clocks"></header>
       <section class="status" id="status"><p class="muted">載入中…</p></section>
-      <section class="gallery" id="gallery" hidden></section>
+      <section class="gallery pc-embed" id="gallery" hidden></section>
       <details class="flights" id="flights" hidden><summary><span class="ttl">航段</span><span class="muted" id="flights-sum"></span></summary><div id="flights-body"></div></details>
-      <section class="map-wrap"><div id="map" class="map"></div></section>
+      <section class="map-wrap"><div id="map" class="map"></div><button class="map-all" id="map-all" type="button" hidden>顯示全部打卡點</button></section>
       <section class="timeline"><h2>時間軸</h2><ul id="timeline"></ul><div id="tl-more" class="tl-more"></div></section>
       <footer class="foot"><small>此頁僅供持有連結者查看。位置由旅行者主動回報，非即時追蹤。</small></footer>
     </div>`;
@@ -75,7 +77,7 @@ export function renderFamilyPage(root: HTMLElement, token: string, tlOpts: Timel
     moreEl.textContent = loadingMore ? '載入中…' : hasMore ? '' : all.length > PAGE ? '已顯示全部' : '';
     moreEl.hidden = !hasMore && all.length <= PAGE;
   };
-  const toRecent = (j: { id: string; lat: number; lng: number; acc: number | null; src: RecentItem['src']; tz: string; place: string | null; note: string; photoId: string | null; takenAt: string | null; at: string }): RecentItem => ({
+  const toRecent = (j: { id: string; lat: number; lng: number; acc: number | null; src: RecentItem['src']; tz: string; place: string | null; placeEn?: string | null; note: string; photoId: string | null; takenAt: string | null; at: string }): RecentItem => ({
     id: j.id,
     lat: j.lat,
     lng: j.lng,
@@ -83,6 +85,7 @@ export function renderFamilyPage(root: HTMLElement, token: string, tlOpts: Timel
     src: j.src,
     tz: j.tz,
     place: j.place,
+    placeEn: j.placeEn ?? null,
     note: j.note,
     photoId: j.photoId,
     takenAt: j.takenAt ? Timestamp.fromDate(new Date(j.takenAt)) : null,
@@ -215,118 +218,91 @@ export function renderFamilyPage(root: HTMLElement, token: string, tlOpts: Timel
       '</ul><p class="muted small">時間為各地當地時間；飛行中不會發出警報，落地後 3 小時內需回報。</p>';
   };
 
-  // ---- 最近照片幻燈片：先放 recent 前 10 張，往右滑到尾端再補（先用 recent 其餘，再向 API 續抓） ----
-  const GALLERY_PAGE = 10;
-  let galleryKey = '';
-  let galleryIdx = 0;
-  let galleryPausedUntil = 0;
-  let galleryPhotos: RecentItem[] = [];
-  let galleryCursor: string | null = null; // API 掃描游標（掃過的最舊一筆 at）
-  let galleryExhausted = false;
-  let galleryLoading = false;
+  // ---- 地圖：預設框住已載入的打卡點；明信片換卡（含自動輪播）時飛到該張照片的拍攝地 ----
+  const mapAllBtn = root.querySelector<HTMLButtonElement>('#map-all')!;
+  const mapEl = root.querySelector<HTMLElement>('#map')!;
+  const focusMarker = L.circleMarker([0, 0], { radius: 10, color: '#fff', weight: 3, fillColor: '#b8412f', fillOpacity: 1 });
+  const focusHalo = L.circle([0, 0], { radius: 1500, color: '#b8412f', weight: 1, fillOpacity: 0.08 });
+  let mapUserUntil = 0; // 使用者剛拖過地圖，20 秒內自動輪播不搶走視角
+  const noteMapUse = (): void => {
+    mapUserUntil = Date.now() + 20_000;
+  };
+  mapEl.addEventListener('pointerdown', noteMapUse, { passive: true });
+  mapEl.addEventListener('wheel', noteMapUse, { passive: true });
+  const focusPhoto = (p: PostcardPhoto, manual: boolean): void => {
+    if (!manual && Date.now() < mapUserUntil) return;
+    const ll: L.LatLngExpression = [p.lat, p.lng];
+    focusMarker.setLatLng(ll).addTo(map);
+    focusHalo.setLatLng(ll).addTo(map);
+    focusMarker.unbindTooltip();
+    if (p.place) focusMarker.bindTooltip(p.place, { direction: 'top' });
+    map.flyTo(ll, Math.max(map.getZoom(), 10), { duration: 1.2 });
+    mapAllBtn.hidden = false;
+  };
+  const showAllPoints = (): void => {
+    focusMarker.remove();
+    focusHalo.remove();
+    mapAllBtn.hidden = true;
+    track.fit();
+    noteMapUse();
+  };
+  mapAllBtn.addEventListener('click', showAllPoints);
 
-  const slideHtml = (p: RecentItem, i: number): string => {
-    const url = photoUrl(p.photoId!);
-    return `<figure class="slide" data-i="${i}">
-      <a href="${url}" target="_blank" rel="noopener"><img src="${url}" alt="" loading="${i < 2 ? 'eager' : 'lazy'}" /></a>
-      <a class="slide-dl" href="${url}" download="${esc((p.place ?? 'photo').split(',')[0].trim().replace(/\s+/g, '_'))}_${p.at.toDate().toISOString().slice(0, 10)}.jpg" aria-label="下載" title="下載這張照片"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg></a>
-      <figcaption><span>${p.place ? esc(placeText(p)) : ''}</span><span class="when">${esc(fmtDateTime(p.at.toDate(), p.tz))}</span>${p.note ? `<span class="note">「${esc(p.note)}」</span>` : ''}</figcaption>
-    </figure>`;
-  };
-  const renderCounter = (): void => {
-    const c = galleryEl.querySelector<HTMLElement>('#gallery-counter');
-    if (c) c.textContent = `${galleryIdx + 1} / ${galleryPhotos.length}${galleryExhausted ? '' : '+'}`;
-  };
-  const appendPhotos = (items: RecentItem[]): void => {
-    const seen = new Set(galleryPhotos.map((p) => p.photoId));
-    const fresh = items.filter((p) => p.photoId && !seen.has(p.photoId));
-    if (!fresh.length) return;
-    const slides = galleryEl.querySelector<HTMLElement>('#slides');
-    if (!slides) return;
-    const base = galleryPhotos.length;
-    galleryPhotos = [...galleryPhotos, ...fresh];
-    slides.insertAdjacentHTML('beforeend', fresh.map((p, k) => slideHtml(p, base + k)).join(''));
-    renderCounter();
-  };
+  // ---- 明信片牌堆：recent 內有照片的先進牌堆，其餘向 API 續抓（每頁 50，最多 200 張），隨機輪播 ----
+  let deck: PostcardDeck | null = null;
+  let pcCursor: string | null = null; // API 掃描游標（掃過的最舊一筆 at）
+  let pcExhausted = false;
+  let pcLoading = false;
+  const toPhoto = (r: RecentItem): PostcardPhoto | null =>
+    r.photoId
+      ? {
+          photoId: r.photoId,
+          lat: r.lat,
+          lng: r.lng,
+          tz: r.tz,
+          place: r.place ?? null,
+          placeEn: r.placeEn ?? null,
+          takenAt: r.takenAt ? r.takenAt.toDate().toISOString() : null,
+          at: r.at.toDate().toISOString(),
+        }
+      : null;
+  const photosOf = (items: RecentItem[]): PostcardPhoto[] => items.map(toPhoto).filter((x): x is PostcardPhoto => !!x);
   const loadMorePhotos = async (): Promise<void> => {
-    if (!view || galleryLoading || galleryExhausted) return;
-    // 1) recent 裡還沒放進來的
-    const seen = new Set(galleryPhotos.map((p) => p.photoId));
-    const fromRecent = view.recent.filter((r) => r.photoId && !seen.has(r.photoId)).slice(0, GALLERY_PAGE);
-    if (fromRecent.length) {
-      appendPhotos(fromRecent);
-      return;
-    }
-    // 2) 比 recent 更舊的，向 API 續抓（游標從 recent 最後一筆開始）
-    galleryLoading = true;
+    if (!view || !deck || pcLoading || pcExhausted || deck.count() >= 200) return;
+    pcLoading = true;
     try {
-      const before = galleryCursor ?? view.recent[view.recent.length - 1]?.at.toDate().toISOString() ?? new Date().toISOString();
-      const res = await fetch(`/api/w/${encodeURIComponent(token)}/checkins?photos=1&limit=${GALLERY_PAGE}&before=${encodeURIComponent(before)}`);
+      const before = pcCursor ?? view.recent[view.recent.length - 1]?.at.toDate().toISOString() ?? new Date().toISOString();
+      const res = await fetch(`/api/w/${encodeURIComponent(token)}/checkins?photos=1&limit=50&before=${encodeURIComponent(before)}`);
       if (!res.ok) {
-        galleryExhausted = true;
+        pcExhausted = true;
         return;
       }
       const data = (await res.json()) as { items: Parameters<typeof toRecent>[0][]; cursor: string | null; exhausted: boolean };
-      galleryCursor = data.cursor;
-      galleryExhausted = data.exhausted;
-      appendPhotos(data.items.map(toRecent));
+      pcCursor = data.cursor;
+      pcExhausted = data.exhausted || !data.cursor;
+      deck.addPhotos(photosOf(data.items.map(toRecent)));
     } catch {
-      galleryExhausted = true;
+      pcExhausted = true;
     } finally {
-      galleryLoading = false;
-      renderCounter();
+      pcLoading = false;
     }
   };
-
   const renderGallery = (): void => {
     if (!view) return;
-    const head = view.recent.filter((r) => r.photoId).slice(0, GALLERY_PAGE);
-    const key = head.map((p) => p.photoId).join(',');
-    if (!head.length) {
+    const items = photosOf(view.recent);
+    if (!items.length && !deck) {
       galleryEl.hidden = true;
-      galleryKey = '';
       return;
     }
     galleryEl.hidden = false;
-    if (key === galleryKey) return; // 只有最新 10 張變了才重建（新照片進來）
-    galleryKey = key;
-    galleryIdx = 0;
-    galleryPhotos = head;
-    galleryCursor = null;
-    galleryExhausted = false;
-    galleryEl.innerHTML = `
-      <div class="slides" id="slides">${head.map(slideHtml).join('')}</div>
-      <span class="counter" id="gallery-counter"></span>
-      <a class="pc-link" href="/g/${encodeURIComponent(token)}">🖼 明信片模式</a>`;
-    renderCounter();
-    const slides = galleryEl.querySelector<HTMLElement>('#slides')!;
-    slides.addEventListener(
-      'scroll',
-      () => {
-        galleryPausedUntil = Date.now() + 10_000;
-        const i = Math.round(slides.scrollLeft / slides.clientWidth);
-        if (i !== galleryIdx) {
-          galleryIdx = i;
-          renderCounter();
-        }
-        // 快到尾端就補下一批
-        if (i >= galleryPhotos.length - 2) void loadMorePhotos();
-      },
-      { passive: true },
-    );
+    if (!deck) {
+      deck = createPostcardDeck(galleryEl, { photoUrl, onChange: focusPhoto, onNeedMore: () => void loadMorePhotos() });
+      deck.addPhotos(items);
+      void loadMorePhotos();
+    } else {
+      deck.addPhotos(items, { front: true }); // 新照片進來就排在下一張
+    }
   };
-  const galleryTimer = window.setInterval(() => {
-    const slides = galleryEl.querySelector<HTMLElement>('#slides');
-    if (!slides || galleryEl.hidden || document.visibilityState !== 'visible' || Date.now() < galleryPausedUntil) return;
-    const n = slides.children.length;
-    if (n < 2) return;
-    const next = (galleryIdx + 1) % n;
-    galleryIdx = next;
-    slides.scrollTo({ left: next * slides.clientWidth, behavior: 'smooth' });
-    renderCounter();
-    // 自動輪播觸發的 scroll 事件不該算成使用者操作
-    window.setTimeout(() => (galleryPausedUntil = 0), 800);
-  }, 5000);
 
   const renderAll = (): void => {
     if (!view) return;
@@ -368,7 +344,7 @@ export function renderFamilyPage(root: HTMLElement, token: string, tlOpts: Timel
 
   return () => {
     io.disconnect();
-    window.clearInterval(galleryTimer);
+    deck?.destroy();
     window.clearInterval(clockTimer);
     window.clearInterval(agoTimer);
     unsub();
