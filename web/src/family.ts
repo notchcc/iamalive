@@ -39,9 +39,12 @@ export function renderFamilyPage(root: HTMLElement, token: string, tlOpts: Timel
   const PIN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0z"/><circle cx="12" cy="10" r="3"/></svg>';
   const mountStatus = (): void => {
     statusEl.innerHTML = `
+      <div class="status-top">
+      <div class="trip-title" id="status-title"></div>
       <div class="status-actions">
         <button class="card-toggle" id="last-toggle" type="button" hidden aria-expanded="false" aria-controls="last-panel" title="最後打卡與下次期限">${PIN}<span class="lbl" id="last-place"></span></button>
         <button class="card-toggle" id="flights-toggle" type="button" hidden aria-expanded="false" aria-controls="flights-panel" title="航段資訊">${PLANE}<span class="lbl" id="flights-count"></span></button>
+      </div>
       </div>
       <div id="status-main"></div>
       <div class="card-panel" id="last-panel" hidden></div>
@@ -218,8 +221,8 @@ export function renderFamilyPage(root: HTMLElement, token: string, tlOpts: Timel
     // 主區只留標題、狀態大字，以及警示類副標（超時 / 離線 / 飛行中 / 已結束）。
     const collapsed = !!last;
     const showSub = !collapsed || cls !== 'ok';
+    q('#status-title').innerHTML = `${esc(view.title)} <span class="muted">每 ${view.intervalHours} 小時回報</span>`;
     statusMain().innerHTML = `
-      <div class="trip-title">${esc(view.title)} <span class="muted">每 ${view.intervalHours} 小時回報</span></div>
       <div class="head">${esc(head)}</div>
       ${collapsed ? '' : lastLine}
       ${showSub && sub ? `<div class="sub">${esc(sub)}</div>` : ''}`;
