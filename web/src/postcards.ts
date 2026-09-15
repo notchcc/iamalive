@@ -103,6 +103,7 @@ export function renderPostcardsPage(root: HTMLElement, token: string): () => voi
   const lbDl = root.querySelector<HTMLAnchorElement>('#lb-dl')!;
   let current: PhotoJson | null = null;
   let viewing = false;
+  const mapWrap = root.querySelector<HTMLElement>('.pc-mapwrap')!;
   const fileName = (p: PhotoJson): string => `${(resolveLabel(p).city || resolveLabel(p).country || 'photo').replace(/\s+/g, '_')}_${(p.takenAt ?? p.at).slice(0, 10)}.jpg`;
   const openViewer = (): void => {
     if (!current) return;
@@ -110,10 +111,14 @@ export function renderPostcardsPage(root: HTMLElement, token: string): () => voi
     lbDl.href = photoUrl(current.photoId!);
     lbDl.setAttribute('download', fileName(current));
     lightbox.hidden = false;
+    mapWrap.classList.add('is-hidden');
+    document.body.style.overflow = 'hidden';
     viewing = true;
   };
   const closeViewer = (): void => {
     lightbox.hidden = true;
+    mapWrap.classList.remove('is-hidden');
+    document.body.style.overflow = '';
     viewing = false;
     lbImg.removeAttribute('src');
   };

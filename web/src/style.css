@@ -289,6 +289,7 @@ details.extras summary .muted { color: var(--text); font-size: 13px; min-width: 
 
 /* 明信片頁：下方獨立地圖（不傾斜、可互動） */
 .pc-mapwrap { padding: 0 12px 12px; }
+.pc-mapwrap.is-hidden { visibility: hidden; }
 .pc-mapbig { height: var(--pc-map-h); border-radius: 14px; overflow: hidden; border: 1px solid rgba(255,255,255,0.15); box-shadow: 0 10px 30px rgba(0,0,0,0.35); background: #e5e7eb; }
 .pc-deck { padding-bottom: 12px; }
 
@@ -306,7 +307,7 @@ details.extras summary .muted { color: var(--text); font-size: 13px; min-width: 
 
 /* 明信片頁：全螢幕檢視 */
 .pc-photo { cursor: zoom-in; }
-.pc-lightbox { position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,0.94); display: flex; align-items: center; justify-content: center; }
+.pc-lightbox { position: fixed; inset: 0; z-index: 10000; background: rgba(0,0,0,0.94); display: flex; align-items: center; justify-content: center; }
 .pc-lightbox[hidden] { display: none; }
 .pc-lightbox img { max-width: 100vw; max-height: 100dvh; object-fit: contain; display: block; }
 .lb-actions { position: fixed; top: calc(12px + env(safe-area-inset-top)); right: 14px; display: flex; gap: 10px; }
