@@ -62,6 +62,7 @@ export function renderPostcardsPage(root: HTMLElement, token: string): () => voi
         <button class="pc-pause" id="pc-pause" type="button" aria-label="暫停">❚❚</button>
       </header>
       <div class="pc-deck" id="pc-deck"><p class="pc-empty">載入中…</p></div>
+      <div class="pc-mapwrap"><div id="pc-map" class="pc-mapbig"></div></div>
     </div>`;
   const deck = root.querySelector<HTMLElement>('#pc-deck')!;
   const titleEl = root.querySelector<HTMLElement>('#pc-title')!;
@@ -82,28 +83,32 @@ export function renderPostcardsPage(root: HTMLElement, token: string): () => voi
     const city = place.split(',')[0].trim();
     return `
       <article class="postcard" style="--rot:${rot}deg">
-        <div class="pc-photo"><img src="${photoUrl(p.photoId!)}" alt="" />
+        <div class="pc-photo"><img src="${photoUrl(p.photoId!)}" alt="" title="${esc(place)}" />
           <div class="pc-postmark"><span>${esc(ld.short)}</span><small>${esc(city)}</small></div>
         </div>
-        <div class="pc-mapside"><div class="pc-map" data-lat="${p.lat}" data-lng="${p.lng}" title="${esc(place)}"></div></div>
       </article>`;
   };
 
-  const maps = new WeakMap<HTMLElement, L.Map>();
-  const mountMap = (card: HTMLElement): void => {
-    const el = card.querySelector<HTMLElement>('.pc-map');
-    if (!el) return;
-    const lat = Number(el.dataset.lat);
-    const lng = Number(el.dataset.lng);
-    const map = L.map(el, { zoomControl: false, attributionControl: false, dragging: false, scrollWheelZoom: false, doubleClickZoom: false, touchZoom: false, boxZoom: false, keyboard: false, tap: false } as L.MapOptions);
-    tileLayer().addTo(map);
-    map.setView([lat, lng], 11);
-    L.circleMarker([lat, lng], { radius: 9, color: '#fff', weight: 3, fillColor: '#b8412f', fillOpacity: 1 }).addTo(map);
-    L.circle([lat, lng], { radius: 1500, color: '#b8412f', weight: 1, fillOpacity: 0.08 }).addTo(map);
-    maps.set(card, map);
-    window.setTimeout(() => map.invalidateSize(), 60);
-    window.setTimeout(() => map.invalidateSize(), 750); // 飛入動畫結束後再算一次
+  // 下方獨立、可互動的地圖：換卡時飛到該張照片的拍攝地點
+  const map = L.map(root.querySelector<HTMLElement>('#pc-map')!, { zoomControl: true, attributionControl: false });
+  tileLayer().addTo(map);
+  map.setView([25.04, 121.56], 3);
+  const marker = L.circleMarker([0, 0], { radius: 9, color: '#fff', weight: 3, fillColor: '#b8412f', fillOpacity: 1 }).addTo(map);
+  const halo = L.circle([0, 0], { radius: 1500, color: '#b8412f', weight: 1, fillOpacity: 0.08 }).addTo(map);
+  let mapReady = false;
+  const focusMap = (p: PhotoJson): void => {
+    const ll: L.LatLngExpression = [p.lat, p.lng];
+    marker.setLatLng(ll);
+    halo.setLatLng(ll);
+    marker.bindTooltip(p.place ?? '', { permanent: false, direction: 'top' });
+    if (!mapReady) {
+      map.setView(ll, 11);
+      mapReady = true;
+    } else {
+      map.flyTo(ll, Math.max(map.getZoom(), 9), { duration: 1.2 });
+    }
   };
+  window.setTimeout(() => map.invalidateSize(), 60);
 
   const preload = (p: PhotoJson | undefined): void => {
     if (p?.photoId) new Image().src = photoUrl(p.photoId);
@@ -128,13 +133,10 @@ export function renderPostcardsPage(root: HTMLElement, token: string): () => voi
     const card = deck.lastElementChild as HTMLElement;
     card.classList.add(dir === 1 ? 'enter-right' : 'enter-left');
     requestAnimationFrame(() => card.classList.add('in'));
-    mountMap(card);
+    focusMap(p);
     if (prev) {
       prev.classList.add('leave', dir === 1 ? 'leave-left' : 'leave-right');
-      window.setTimeout(() => {
-        maps.get(prev)?.remove();
-        prev.remove();
-      }, 700);
+      window.setTimeout(() => prev.remove(), 700);
     }
     deck.querySelector('.pc-empty')?.remove();
     preload(order[pos + 1]);
@@ -219,5 +221,6 @@ export function renderPostcardsPage(root: HTMLElement, token: string): () => voi
     if (timer) window.clearInterval(timer);
     document.removeEventListener('keydown', onKey);
     document.documentElement.style.background = prevBg;
+    map.remove();
   };
 }
