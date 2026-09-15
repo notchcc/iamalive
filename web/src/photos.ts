@@ -248,6 +248,11 @@ export function renderPhotosPage(root: HTMLElement, token: string): () => void {
       m.on('click', () => {
         if (c.items.length > 1 && zoom < MAX_ZOOM) {
           map!.flyToBounds(L.latLngBounds(c.items.map((p) => [p.lat, p.lng] as L.LatLngTuple)).pad(0.3), { maxZoom: MAX_ZOOM, duration: 0.8 });
+        } else if (deck) {
+          // 單張（或已放到底的群）：顯示在上方幻燈片，群內其餘的接著播
+          noteMapUse();
+          deck.jumpTo(c.items.map((p) => p.photoId));
+          deckEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         } else {
           lightbox.open(viewerItems(c.items), 0);
         }

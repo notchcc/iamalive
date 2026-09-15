@@ -29,6 +29,8 @@ export interface DeckOptions {
 export interface PostcardDeck {
   /** 設定 / 補充照片；已在牌堆內的略過，新照片（front=true）排在下一張 */
   addPhotos(items: PostcardPhoto[], opts?: { front?: boolean }): void;
+  /** 立刻切到指定的照片（依 photoId），其餘指定的排在後面接著播；不在牌堆內的略過 */
+  jumpTo(photoIds: string[]): void;
   count(): number;
   destroy(): void;
 }
@@ -250,6 +252,16 @@ export function createPostcardDeck(host: HTMLElement, opts: DeckOptions): Postca
         order = [...order.slice(0, pos + 1), ...shuffle([...order.slice(pos + 1), ...fresh])];
       }
       preload(order[pos + 1]);
+    },
+    jumpTo(photoIds) {
+      const picked = photoIds.map((id) => photos.find((p) => p.photoId === id)).filter((p): p is PostcardPhoto => !!p);
+      if (!picked.length) return;
+      if (picked[0] === current && picked.length === 1) return;
+      const rest = picked[0] === current ? picked.slice(1) : picked;
+      if (!rest.length) return;
+      order = [...order.slice(0, pos + 1), ...rest, ...order.slice(pos + 1)];
+      next(true);
+      showNav();
     },
     count: () => photos.length,
     destroy() {
