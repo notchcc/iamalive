@@ -293,9 +293,6 @@ details.extras summary .muted { color: var(--text); font-size: 13px; min-width: 
 .pc-deck { padding-bottom: 12px; }
 
 /* 下載鈕 */
-.pc-actions { display: inline-flex; gap: 8px; align-items: center; }
-.pc-dl { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: 999px; background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.25); color: #fff; }
-.pc-dl svg { width: 18px; height: 18px; }
 .gallery .slide .slide-dl { position: absolute; top: 10px; right: 10px; width: 34px; height: 34px; border-radius: 999px; background: rgba(0,0,0,0.35); color: #fff; display: inline-flex; align-items: center; justify-content: center; backdrop-filter: blur(2px); }
 .gallery .slide .slide-dl svg { width: 18px; height: 18px; }
 
@@ -306,3 +303,12 @@ details.extras summary .muted { color: var(--text); font-size: 13px; min-width: 
 .pc-mark .mk-city { font-weight: 700; font-size: clamp(20px, 3.4vw, 34px); letter-spacing: 3px; line-height: 1.1; }
 .pc-mark .mk-sub { font-weight: 500; font-size: clamp(13px, 1.8vw, 17px); letter-spacing: 2px; opacity: 0.92; margin-top: 6px; }
 @media (max-width: 640px) { .pc-mark { left: 22px; bottom: 22px; } }
+
+/* 明信片頁：全螢幕檢視 */
+.pc-photo { cursor: zoom-in; }
+.pc-lightbox { position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,0.94); display: flex; align-items: center; justify-content: center; }
+.pc-lightbox[hidden] { display: none; }
+.pc-lightbox img { max-width: 100vw; max-height: 100dvh; object-fit: contain; display: block; }
+.lb-actions { position: fixed; top: calc(12px + env(safe-area-inset-top)); right: 14px; display: flex; gap: 10px; }
+.lb-btn { width: 40px; height: 40px; border-radius: 999px; background: rgba(255,255,255,0.14); border: 1px solid rgba(255,255,255,0.3); color: #fff; display: inline-flex; align-items: center; justify-content: center; font-size: 16px; padding: 0; text-decoration: none; backdrop-filter: blur(4px); }
+.lb-btn svg { width: 20px; height: 20px; }

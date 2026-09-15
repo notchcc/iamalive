@@ -83,18 +83,45 @@ export function renderPostcardsPage(root: HTMLElement, token: string): () => voi
       <header class="pc-head">
         <a class="pc-back" href="/w/${encodeURIComponent(token)}">‹ 家人頁</a>
         <span class="pc-title" id="pc-title"></span>
-        <span class="pc-actions">
-          <a class="pc-dl" id="pc-dl" href="#" download aria-label="下載這張照片" title="下載這張照片" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg></a>
-          <button class="pc-pause" id="pc-pause" type="button" aria-label="暫停">❚❚</button>
-        </span>
+        <button class="pc-pause" id="pc-pause" type="button" aria-label="暫停">❚❚</button>
       </header>
+      <div class="pc-lightbox" id="pc-lightbox" hidden>
+        <img id="lb-img" alt="" />
+        <div class="lb-actions">
+          <a class="lb-btn" id="lb-dl" href="#" download aria-label="下載這張照片" title="下載"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg></a>
+          <button class="lb-btn" id="lb-close" type="button" aria-label="關閉">✕</button>
+        </div>
+      </div>
       <div class="pc-deck" id="pc-deck"><p class="pc-empty">載入中…</p></div>
       <div class="pc-mapwrap"><div id="pc-map" class="pc-mapbig"></div></div>
     </div>`;
   const deck = root.querySelector<HTMLElement>('#pc-deck')!;
   const titleEl = root.querySelector<HTMLElement>('#pc-title')!;
   const pauseBtn = root.querySelector<HTMLButtonElement>('#pc-pause')!;
-  const dlEl = root.querySelector<HTMLAnchorElement>('#pc-dl')!;
+  const lightbox = root.querySelector<HTMLElement>('#pc-lightbox')!;
+  const lbImg = root.querySelector<HTMLImageElement>('#lb-img')!;
+  const lbDl = root.querySelector<HTMLAnchorElement>('#lb-dl')!;
+  let current: PhotoJson | null = null;
+  let viewing = false;
+  const fileName = (p: PhotoJson): string => `${(resolveLabel(p).city || resolveLabel(p).country || 'photo').replace(/\s+/g, '_')}_${(p.takenAt ?? p.at).slice(0, 10)}.jpg`;
+  const openViewer = (): void => {
+    if (!current) return;
+    lbImg.src = photoUrl(current.photoId!);
+    lbDl.href = photoUrl(current.photoId!);
+    lbDl.setAttribute('download', fileName(current));
+    lightbox.hidden = false;
+    viewing = true;
+  };
+  const closeViewer = (): void => {
+    lightbox.hidden = true;
+    viewing = false;
+    lbImg.removeAttribute('src');
+  };
+  root.querySelector('#lb-close')!.addEventListener('click', closeViewer);
+  lightbox.addEventListener('click', (e) => {
+    if ((e.target as HTMLElement).closest('.lb-actions')) return;
+    closeViewer();
+  });
   const photoUrl = (id: string): string => `/api/p/${encodeURIComponent(token)}/${encodeURIComponent(id)}`;
 
   let title = '';
@@ -152,9 +179,7 @@ export function renderPostcardsPage(root: HTMLElement, token: string): () => voi
     card.classList.add(dir === 1 ? 'enter-right' : 'enter-left');
     requestAnimationFrame(() => card.classList.add('in'));
     focusMap(p);
-    dlEl.hidden = false;
-    dlEl.href = photoUrl(p.photoId!);
-    dlEl.setAttribute('download', `${(resolveLabel(p).city || resolveLabel(p).country || 'photo').replace(/\s+/g, '_')}_${(p.takenAt ?? p.at).slice(0, 10)}.jpg`);
+    current = p;
     if (prev) {
       prev.classList.add('leave', dir === 1 ? 'leave-left' : 'leave-right');
       window.setTimeout(() => prev.remove(), 700);
@@ -177,7 +202,7 @@ export function renderPostcardsPage(root: HTMLElement, token: string): () => voi
   const restart = (): void => {
     if (timer) window.clearInterval(timer);
     timer = window.setInterval(() => {
-      if (!paused && document.visibilityState === 'visible') next();
+      if (!paused && !viewing && document.visibilityState === 'visible') next();
     }, INTERVAL);
   };
 
@@ -187,7 +212,11 @@ export function renderPostcardsPage(root: HTMLElement, token: string): () => voi
     pauseBtn.setAttribute('aria-label', paused ? '播放' : '暫停');
   });
   deck.addEventListener('click', (e) => {
-    if ((e.target as HTMLElement).closest('a')) return;
+    const t = e.target as HTMLElement;
+    if (t.closest('.pc-photo')) {
+      openViewer();
+      return;
+    }
     next();
   });
   let tx = 0;
@@ -195,6 +224,7 @@ export function renderPostcardsPage(root: HTMLElement, token: string): () => voi
   deck.addEventListener(
     'touchend',
     (e) => {
+      if (viewing) return;
       const dx = e.changedTouches[0].clientX - tx;
       if (dx < -40) next();
       else if (dx > 40) back();
@@ -202,6 +232,11 @@ export function renderPostcardsPage(root: HTMLElement, token: string): () => voi
     { passive: true },
   );
   const onKey = (e: KeyboardEvent): void => {
+    if (e.key === 'Escape' && viewing) {
+      closeViewer();
+      return;
+    }
+    if (viewing) return;
     if (e.key === 'ArrowRight' || e.key === ' ') next();
     else if (e.key === 'ArrowLeft') back();
   };
