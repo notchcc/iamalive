@@ -10,7 +10,7 @@ import { renderShareBar } from './share';
 import { renderForecast } from './forecast';
 import L from 'leaflet';
 import { Timestamp } from 'firebase/firestore';
-import { TrackLayer, createMap } from './mapview';
+import { TrackLayer, createMap, renderTimeline } from './mapview';
 import type { CheckinJson, RecentItem } from './types';
 import { applyPwaIdentity } from './pwa';
 
@@ -75,6 +75,7 @@ export function renderCheckinPage(root: HTMLElement, token: string): () => void 
         <div id="cp-map" class="map small"></div>
         <p id="cp-map-note" class="muted small"></p>
       </section>
+      <section class="timeline"><h2>最近 5 次打卡</h2><ul id="cp-timeline"></ul></section>
       <footer class="foot"><small>此頁不需登入，持有連結者即可替這趟行程打卡，請勿轉傳。<br><button id="cp-refresh" class="link" type="button">重新整理</button></small></footer>
     </div>`;
 
@@ -97,6 +98,7 @@ export function renderCheckinPage(root: HTMLElement, token: string): () => void 
   const map = createMap(root.querySelector<HTMLElement>('#cp-map')!);
   const track = new TrackLayer(map);
   const mapNote = root.querySelector<HTMLElement>('#cp-map-note')!;
+  const tlEl = root.querySelector<HTMLElement>('#cp-timeline')!;
   let hereLayer: L.LayerGroup | null = null;
   let here: { lat: number; lng: number; acc: number | null } | null = null;
   let recentItems: RecentItem[] = [];
@@ -137,6 +139,7 @@ export function renderCheckinPage(root: HTMLElement, token: string): () => void 
   const drawRecent = (items: CheckinJson[]): void => {
     recentItems = items.slice(0, 5).map(toRecentItem);
     track.render(recentItems, { fit: false });
+    renderTimeline(tlEl, recentItems, new Date());
     fitMap();
     window.setTimeout(() => map.invalidateSize(), 50);
   };
@@ -343,7 +346,10 @@ export function renderCheckinPage(root: HTMLElement, token: string): () => void 
     if (document.visibilityState === 'visible') void load();
   };
   document.addEventListener('visibilitychange', onVisible);
-  timer = window.setInterval(renderStatus, 30_000);
+  timer = window.setInterval(() => {
+    renderStatus();
+    if (recentItems.length) renderTimeline(tlEl, recentItems, new Date());
+  }, 30_000);
   void load();
 
   return () => {
