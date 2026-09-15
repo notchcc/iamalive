@@ -28,7 +28,7 @@ function esc(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
 }
 
-export function createLightbox(opts: { onToggle?: (open: boolean) => void } = {}): Lightbox {
+export function createLightbox(opts: { onToggle?: (open: boolean) => void; /** 關閉時回傳最後看到的索引 */ onClose?: (index: number) => void } = {}): Lightbox {
   const el = document.createElement('div');
   el.className = 'pc-lightbox';
   el.hidden = true;
@@ -137,6 +137,7 @@ export function createLightbox(opts: { onToggle?: (open: boolean) => void } = {}
     stage.innerHTML = '';
     if (navTimer) window.clearTimeout(navTimer);
     opts.onToggle?.(false);
+    opts.onClose?.(idx);
   };
   const onKey = (e: KeyboardEvent): void => {
     if (!open) return;

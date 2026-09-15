@@ -106,11 +106,28 @@ export function createPostcardDeck(host: HTMLElement, opts: DeckOptions): Postca
     navTimer = window.setTimeout(() => deck.classList.add('nav-hidden'), NAV_HIDE_MS);
   };
 
-  // ---- 全螢幕檢視（共用元件）----
-  const lightbox = createLightbox({ onToggle: (open) => (viewing = open) });
+  // ---- 全螢幕檢視（共用元件）：帶入已載入的全部照片（新到舊），可左右滑看其他張；
+  //      關閉時若看的不是原本那張，幻燈片就切到那一張（視同手動換張，地圖會跟著飛） ----
+  let viewerList: PostcardPhoto[] = [];
+  const lightbox = createLightbox({
+    onToggle: (open) => (viewing = open),
+    onClose: (i) => {
+      const p = viewerList[i];
+      viewerList = [];
+      if (!p || p === current) return;
+      order = [...order.slice(0, pos + 1), p, ...order.slice(pos + 1)];
+      next(true);
+    },
+  });
+  const caption = (p: PostcardPhoto): string => [p.place || tzLabel(p.tz), fmtDateTime(new Date(p.at), p.tz)].join(' · ');
   const openViewer = (): void => {
     if (!current) return;
-    lightbox.open([{ src: opts.photoUrl(current.photoId), download: postcardFileName(current) }]);
+    viewerList = [...photos].sort((a, b) => (a.at < b.at ? 1 : -1));
+    const i = Math.max(0, viewerList.indexOf(current));
+    lightbox.open(
+      viewerList.map((p) => ({ src: opts.photoUrl(p.photoId), download: postcardFileName(p), caption: caption(p) })),
+      i,
+    );
   };
 
   const preload = (p: PostcardPhoto | undefined): void => {
