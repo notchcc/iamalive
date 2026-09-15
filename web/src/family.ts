@@ -34,28 +34,42 @@ export function renderFamilyPage(root: HTMLElement, token: string, tlOpts: Timel
 
   const clocksEl = root.querySelector<HTMLElement>('#clocks')!;
   const statusEl = root.querySelector<HTMLElement>('#status')!;
-  // 狀態卡：主要內容每秒重繪，航段鈕與航段面板固定不重建（避免點擊時被換掉）
+  // 狀態卡：主要內容每秒重繪；右上角兩顆 toggle 鈕（最後打卡地點 / 航段）與面板固定不重建（避免點擊時被換掉）
   const PLANE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z"/></svg>';
+  const PIN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0z"/><circle cx="12" cy="10" r="3"/></svg>';
   const mountStatus = (): void => {
     statusEl.innerHTML = `
+      <div class="status-actions">
+        <button class="card-toggle" id="last-toggle" type="button" hidden aria-expanded="false" aria-controls="last-panel" title="最後打卡與下次期限">${PIN}<span class="lbl" id="last-place"></span></button>
+        <button class="card-toggle" id="flights-toggle" type="button" hidden aria-expanded="false" aria-controls="flights-panel" title="航段資訊">${PLANE}<span class="lbl" id="flights-count"></span></button>
+      </div>
       <div id="status-main"></div>
-      <button class="flights-toggle" id="flights-toggle" type="button" hidden aria-expanded="false" aria-controls="flights-panel" title="航段資訊">${PLANE}<span id="flights-count"></span></button>
-      <div class="flights-panel" id="flights-panel" hidden><div class="fsum" id="flights-sum"></div><div id="flights-body"></div></div>`;
+      <div class="card-panel" id="last-panel" hidden></div>
+      <div class="card-panel flights-panel" id="flights-panel" hidden><div class="fsum" id="flights-sum"></div><div id="flights-body"></div></div>`;
   };
   mountStatus();
-  const statusMain = (): HTMLElement => root.querySelector<HTMLElement>('#status-main')!;
-  const flightsToggle = root.querySelector<HTMLButtonElement>('#flights-toggle')!;
-  const flightsCount = root.querySelector<HTMLElement>('#flights-count')!;
-  const flightsPanel = root.querySelector<HTMLElement>('#flights-panel')!;
-  const flightsBody = root.querySelector<HTMLElement>('#flights-body')!;
-  const flightsSum = root.querySelector<HTMLElement>('#flights-sum')!;
+  const q = <T extends HTMLElement>(sel: string): T => root.querySelector<T>(sel)!;
+  const statusMain = (): HTMLElement => q('#status-main');
+  const lastToggle = q<HTMLButtonElement>('#last-toggle');
+  const lastPlace = q('#last-place');
+  const lastPanel = q('#last-panel');
+  const flightsToggle = q<HTMLButtonElement>('#flights-toggle');
+  const flightsCount = q('#flights-count');
+  const flightsPanel = q('#flights-panel');
+  const flightsBody = q('#flights-body');
+  const flightsSum = q('#flights-sum');
+  let lastOpen = false;
   let flightsOpen = false;
-  flightsToggle.addEventListener('click', () => {
-    flightsOpen = !flightsOpen;
-    flightsPanel.hidden = !flightsOpen;
-    flightsToggle.setAttribute('aria-expanded', String(flightsOpen));
-    flightsToggle.classList.toggle('on', flightsOpen);
-  });
+  const wireToggle = (btn: HTMLButtonElement, panel: HTMLElement, get: () => boolean, set: (v: boolean) => void): void => {
+    btn.addEventListener('click', () => {
+      set(!get());
+      panel.hidden = !get();
+      btn.setAttribute('aria-expanded', String(get()));
+      btn.classList.toggle('on', get());
+    });
+  };
+  wireToggle(lastToggle, lastPanel, () => lastOpen, (v) => (lastOpen = v));
+  wireToggle(flightsToggle, flightsPanel, () => flightsOpen, (v) => (flightsOpen = v));
   const galleryEl = root.querySelector<HTMLElement>('#gallery')!;
   const timelineEl = root.querySelector<HTMLElement>('#timeline')!;
   applyPwaIdentity('family');
@@ -200,11 +214,26 @@ export function renderFamilyPage(root: HTMLElement, token: string, tlOpts: Timel
 
     statusEl.className = `status ${cls}`;
     if (!root.querySelector('#status-main')) mountStatus(); // 失效 / 錯誤訊息曾把卡片整個換掉
+    // 有打卡紀錄時，最後打卡地點 / 時間與下次期限縮進右上角「📍 地點」鈕的面板；
+    // 主區只留標題、狀態大字，以及警示類副標（超時 / 離線 / 飛行中 / 已結束）。
+    const collapsed = !!last;
+    const showSub = !collapsed || cls !== 'ok';
     statusMain().innerHTML = `
       <div class="trip-title">${esc(view.title)} <span class="muted">每 ${view.intervalHours} 小時回報</span></div>
       <div class="head">${esc(head)}</div>
-      ${lastLine}
-      <div class="sub">${esc(sub)}</div>`;
+      ${collapsed ? '' : lastLine}
+      ${showSub && sub ? `<div class="sub">${esc(sub)}</div>` : ''}`;
+    lastToggle.hidden = !collapsed;
+    if (collapsed) {
+      const placeShort = (lastItem ? placeText(lastItem) : tzLabel(view.travelerTz)).split(',')[0].trim();
+      if (lastPlace.textContent !== placeShort) lastPlace.textContent = placeShort;
+      const deadlineLine =
+        view.status === 'active' ? `${deadline > now ? '下次期限' : '預定回報時間'} ${fmtBoth(deadline, view.travelerTz)}${shiftNote}` : '';
+      lastPanel.innerHTML = `${lastLine}${deadlineLine ? `<div class="sub">${esc(deadlineLine)}</div>` : ''}`;
+      lastPanel.hidden = !lastOpen;
+    } else {
+      lastPanel.hidden = true;
+    }
   };
 
   const renderFlights = (): void => {
