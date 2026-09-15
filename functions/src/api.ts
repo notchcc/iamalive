@@ -451,7 +451,7 @@ export function createApp(): express.Express {
         let filled = 0;
         for (const it of out) {
           if (it.placeEn !== undefined && it.placeEn !== null) continue;
-          if (filled >= 4) break;
+          if (filled >= 2) break;
           const en = await reverseGeocodeEn(it.lat, it.lng);
           filled++;
           if (en) {

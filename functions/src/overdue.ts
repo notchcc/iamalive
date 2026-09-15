@@ -5,6 +5,8 @@ import { logger } from 'firebase-functions/v2';
 import { familyUrl } from './config.js';
 import { Timestamp, pendingPhotosCol, tripsCol } from './db.js';
 import { deletePhoto } from './photos.js';
+import { reverseGeocodeEn } from './geocode.js';
+import { checkinsCol } from './db.js';
 import { alertMessages, pushGroup, pushUser, reminderMessages } from './line.js';
 import { REMIND_LEAD_H, decideOverdue, decideReminder, sleepOf, type OverdueState } from './overdue-logic.js';
 import { HOUR_MS } from './time.js';
@@ -40,6 +42,27 @@ export async function purgeExpiredPendingPhotos(now = new Date()): Promise<numbe
   return q.size;
 }
 
+/** 補齊缺少英文地名的打卡（明信片郵戳用）：每次最多 N 筆，遵守 Nominatim 每秒 1 次。 */
+export async function backfillPlaceEn(maxItems = 8): Promise<number> {
+  if (process.env.FUNCTIONS_EMULATOR === 'true' || process.env.FIREBASE_E2E === '1') return 0; // 測試環境不打 Nominatim
+  const trips = await tripsCol.where('status', '==', 'active').get();
+  let done = 0;
+  for (const t of trips.docs) {
+    if (done >= maxItems) break;
+    const snap = await checkinsCol(t.id).orderBy('createdAt', 'desc').limit(150).get();
+    for (const d of snap.docs) {
+      if (done >= maxItems) break;
+      const c = d.data();
+      if (c.placeEn) continue;
+      const en = await reverseGeocodeEn(c.geo.latitude, c.geo.longitude);
+      done++;
+      if (en) await d.ref.update({ placeEn: en });
+      await new Promise((r) => setTimeout(r, 1100));
+    }
+  }
+  return done;
+}
+
 export interface ScanResult {
   scanned: number;
   alerts: number;
@@ -53,6 +76,7 @@ export interface ScanResult {
  */
 export async function runOverdueScan(now = new Date()): Promise<ScanResult> {
   await purgeExpiredPendingPhotos(now).catch(() => 0);
+  await backfillPlaceEn().catch((e) => logger.warn('backfillPlaceEn failed', { err: String(e) }));
   const snap = await tripsCol
     .where('status', '==', 'active')
     .where('nextDeadlineAt', '<=', Timestamp.fromDate(new Date(now.getTime() + REMIND_LEAD_H * HOUR_MS)))
