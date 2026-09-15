@@ -234,7 +234,7 @@ export function renderFamilyPage(root: HTMLElement, token: string, tlOpts: Timel
       const lastTz = lastItem?.tz ?? view.travelerTz;
       const shiftTag = view.deadlineShift === 'sleep' ? '睡眠時段順延' : view.deadlineShift === 'flight' ? '航段順延' : '';
       const rows = [
-        `<div class="k">最後打卡</div><div class="v">${lastItem ? `<div>${esc(placeText(lastItem))}</div>` : ''}<div class="muted">${esc(fmtBoth(last, lastTz))}</div>${lastItem?.note ? `<div class="note">「${esc(lastItem.note)}」</div>` : ''}</div>`,
+        `<div class="k">最後打卡</div><div class="v"><div>${esc(fmtBoth(last, lastTz))}</div>${lastItem ? `<div class="muted">${esc(placeText(lastItem))}</div>` : ''}${lastItem?.note ? `<div class="note">「${esc(lastItem.note)}」</div>` : ''}</div>`,
       ];
       if (view.status === 'active') {
         rows.push(
