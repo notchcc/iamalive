@@ -1,25 +1,29 @@
 import './style.css';
-import { renderFamilyPage } from './family';
-import { renderMePage } from './me';
-import { renderCheckinPage } from './checkin-page';
-import { renderPhotosPage } from './photos';
-import { renderGoPage, type GoTarget } from './go';
 import { getLiff } from './liff';
 
 const root = document.getElementById('app')!;
 
-function route(): void {
+/**
+ * 各頁面用動態 import 切成獨立 chunk：打卡頁 / 照片回顧頁不必下載家人頁的 Firestore SDK，
+ * 家人頁不必下載管理頁的程式；首次開啟的 JS 少一半以上。
+ */
+async function route(): Promise<void> {
   const path = location.pathname.replace(/\/+$/, '') || '/';
   const family = path.match(/^\/w\/([A-Za-z0-9_-]{16,64})$/);
   if (family) {
+    const { renderFamilyPage } = await import('./family');
     renderFamilyPage(root, family[1]);
   } else if (path === '/me') {
+    const { renderMePage } = await import('./me');
     renderMePage(root);
   } else if (path.match(/^\/me\/go\/(checkin|family|trip)$/)) {
-    renderGoPage(root, path.slice('/me/go/'.length) as GoTarget);
+    const { renderGoPage } = await import('./go');
+    renderGoPage(root, path.slice('/me/go/'.length) as 'checkin' | 'family' | 'trip');
   } else if (path.match(/^\/c\/([A-Za-z0-9_-]{16,64})$/)) {
+    const { renderCheckinPage } = await import('./checkin-page');
     renderCheckinPage(root, path.slice(3));
   } else if (path.match(/^\/p\/([A-Za-z0-9_-]{16,64})$/)) {
+    const { renderPhotosPage } = await import('./photos');
     renderPhotosPage(root, path.slice(3));
   } else {
     root.innerHTML = `
@@ -46,7 +50,7 @@ async function boot(): Promise<void> {
       return;
     }
   }
-  route();
+  await route();
 }
 
 void boot();
