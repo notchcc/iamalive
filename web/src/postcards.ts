@@ -28,7 +28,7 @@ function ensureFonts(): void {
   const l = document.createElement('link');
   l.id = 'pc-fonts';
   l.rel = 'stylesheet';
-  l.href = 'https://fonts.googleapis.com/css2?family=Caveat:wght@500;700&family=Noto+Serif+TC:wght@500;700&display=swap';
+  l.href = 'https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@500;700&display=swap';
   document.head.appendChild(l);
 }
 
@@ -49,64 +49,26 @@ function localDate(iso: string, tz: string): { date: string; time: string; short
   return { date, time, short };
 }
 
-export type MarkStyle = 'a' | 'b' | 'c' | 'd' | 'e';
-
-/** 城市 / 國家（英文優先）：placeEn 城市 → placeEn 只有國名 → 中文 place → 座標。 */
-export function resolveLabel(p: PhotoJson): { city: string; country: string; short: string; long: string } {
+/** 地名一律英文：placeEn 的城市；沒有城市就用國名；完全沒有就留空只顯示日期。 */
+export function resolveLabel(p: PhotoJson): { city: string; country: string; short: string } {
   const ld = localDate(p.takenAt ?? p.at, p.tz);
-  const split = (v: string | null | undefined): [string, string] => {
-    if (!v) return ['', ''];
-    const parts = v.split(',').map((x) => x.trim()).filter(Boolean);
-    return parts.length > 1 ? [parts[0], parts.slice(1).join(', ')] : ['', parts[0] ?? ''];
-  };
-  const [cityEn, countryEn] = split(p.placeEn);
-  const [cityZh, countryZh] = split(p.place);
-  const city = cityEn || countryEn || cityZh || countryZh || `${p.lat.toFixed(2)}°, ${p.lng.toFixed(2)}°`;
-  const country = (cityEn ? countryEn : '') || (cityZh && !cityEn ? countryZh : '');
-  return { city: city.toUpperCase(), country: country.toUpperCase(), short: ld.short, long: `${ld.date} · ${ld.time}` };
+  const parts = (p.placeEn ?? '').split(',').map((x) => x.trim()).filter(Boolean);
+  const city = parts.length > 1 ? parts[0] : (parts[0] ?? '');
+  const country = parts.length > 1 ? parts.slice(1).join(', ') : '';
+  return { city: city.toUpperCase(), country: country.toUpperCase(), short: ld.short };
 }
 
-/** 一張明信片的 HTML（照片 + 五種標示樣式擇一），供頁面與樣式預覽共用。 */
-export function postcardMarkup(p: PhotoJson, opts: { photoUrl: (id: string) => string; mark: MarkStyle; rot: number }): string {
+/** 一張明信片的 HTML：照片 + 左下角地名與日期（單一字體）。 */
+export function postcardMarkup(p: PhotoJson, opts: { photoUrl: (id: string) => string; rot: number }): string {
   const lb = resolveLabel(p);
   const src = opts.photoUrl(p.photoId!);
-  const sub = lb.country ? `${lb.country} · ${lb.short}` : lb.short;
-  let markHtml = '';
-  switch (opts.mark) {
-    case 'a': // 無郵戳：左下大字地名 + 小字國家與日期，底部漸層
-      markHtml = `<div class="pc-shade"></div><div class="pc-mark"><div class="mk-city">${esc(lb.city)}</div><div class="mk-sub">${esc(sub)}</div></div>`;
-      break;
-    case 'b': {
-      // 圓形郵戳：城市沿上弧排列，中央日期，下弧國家
-      const arcLen = 125;
-      const cityLen = Math.min(arcLen - 10, lb.city.length * 8.2);
-      const tl = lb.city.length * 8.2 > arcLen - 10 ? ` textLength="${arcLen - 10}" lengthAdjust="spacingAndGlyphs"` : '';
-      void cityLen;
-      markHtml = `<svg class="pc-mark pc-round" viewBox="0 0 120 120" aria-hidden="true">
-        <defs><path id="arcTop" d="M 20,60 a 40,40 0 1,1 80,0"/><path id="arcBot" d="M 14,60 a 46,46 0 0,0 92,0"/></defs>
-        <circle cx="60" cy="60" r="56" fill="rgba(0,0,0,0.28)" stroke="rgba(255,255,255,0.95)" stroke-width="2.5"/>
-        <circle cx="60" cy="60" r="34" fill="none" stroke="rgba(255,255,255,0.8)" stroke-width="1.2" stroke-dasharray="3 3"/>
-        <text font-size="11" font-weight="700" letter-spacing="1.5" fill="#fff"><textPath href="#arcTop" startOffset="50%" text-anchor="middle"${tl}>${esc(lb.city)}</textPath></text>
-        ${lb.country ? `<text font-size="7.5" letter-spacing="1" fill="rgba(255,255,255,0.9)"><textPath href="#arcBot" startOffset="50%" text-anchor="middle">${esc(lb.country)}</textPath></text>` : ''}
-        <text x="60" y="57" text-anchor="middle" font-size="9.5" font-weight="700" fill="#fff">${esc(lb.short.slice(0, 6))}</text>
-        <text x="60" y="70" text-anchor="middle" font-size="9.5" fill="#fff">${esc(lb.short.slice(-4))}</text>
-        <line x1="8" y1="60" x2="20" y2="60" stroke="rgba(255,255,255,0.8)"/><line x1="100" y1="60" x2="112" y2="60" stroke="rgba(255,255,255,0.8)"/>
-      </svg>`;
-      break;
-    }
-    case 'c': // 行李吊牌：白色標籤、打孔、深色字
-      markHtml = `<div class="pc-mark pc-tag"><i class="hole"></i><div class="mk-city">${esc(lb.city)}</div><div class="mk-sub">${esc(sub)}</div></div>`;
-      break;
-    case 'd': // 底部資訊條：圖釘 + 地名，右側日期
-      markHtml = `<div class="pc-mark pc-strip"><span class="pin">📍</span><span class="mk-city">${esc(lb.city)}</span>${lb.country ? `<span class="mk-country">${esc(lb.country)}</span>` : ''}<span class="mk-date">${esc(lb.short)}</span></div>`;
-      break;
-    case 'e': // 郵票：右上角齒孔郵票，青綠色墨
-      markHtml = `<div class="pc-mark pc-stampmark"><div class="inner"><div class="mk-city">${esc(lb.city)}</div><div class="mk-sub">${esc(sub)}</div></div></div>`;
-      break;
-  }
+  const sub = [lb.country, lb.short].filter(Boolean).join(' · ');
   return `
-      <article class="postcard mark-${opts.mark}" style="--rot:${opts.rot}deg">
-        <div class="pc-photo"><img src="${src}" alt="" title="${esc(p.place ?? '')}" />${markHtml}</div>
+      <article class="postcard" style="--rot:${opts.rot}deg">
+        <div class="pc-photo"><img src="${src}" alt="" />
+          <div class="pc-shade"></div>
+          <div class="pc-mark">${lb.city ? `<div class="mk-city">${esc(lb.city)}</div>` : ''}<div class="mk-sub">${esc(sub)}</div></div>
+        </div>
       </article>`;
 }
 
@@ -143,8 +105,7 @@ export function renderPostcardsPage(root: HTMLElement, token: string): () => voi
   let timer: number | null = null;
   const INTERVAL = 7000;
 
-  const mark = ((new URLSearchParams(location.search).get('mark') ?? 'a').toLowerCase().match(/^[a-e]$/)?.[0] ?? 'a') as MarkStyle;
-  const cardHtml = (p: PhotoJson, rot: number): string => postcardMarkup(p, { photoUrl, mark, rot });
+  const cardHtml = (p: PhotoJson, rot: number): string => postcardMarkup(p, { photoUrl, rot });
 
   // 下方獨立、可互動的地圖：換卡時飛到該張照片的拍攝地點
   const map = L.map(root.querySelector<HTMLElement>('#pc-map')!, { zoomControl: true, attributionControl: false });
@@ -193,7 +154,7 @@ export function renderPostcardsPage(root: HTMLElement, token: string): () => voi
     focusMap(p);
     dlEl.hidden = false;
     dlEl.href = photoUrl(p.photoId!);
-    dlEl.setAttribute('download', `${(p.placeEn ?? p.place ?? 'photo').split(',')[0].trim().replace(/\s+/g, '_')}_${(p.takenAt ?? p.at).slice(0, 10)}.jpg`);
+    dlEl.setAttribute('download', `${(resolveLabel(p).city || resolveLabel(p).country || 'photo').replace(/\s+/g, '_')}_${(p.takenAt ?? p.at).slice(0, 10)}.jpg`);
     if (prev) {
       prev.classList.add('leave', dir === 1 ? 'leave-left' : 'leave-right');
       window.setTimeout(() => prev.remove(), 700);

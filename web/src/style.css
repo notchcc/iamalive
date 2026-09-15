@@ -265,8 +265,8 @@ details.extras summary .muted { color: var(--text); font-size: 13px; min-width: 
   background: repeating-linear-gradient(0deg, rgba(255,255,255,0.85) 0 2px, transparent 2px 6px); opacity: 0.9; }
 .pc-place { font-family: 'Noto Serif TC', serif; font-size: clamp(22px, 3.2vw, 34px); margin: 14px 0 0; line-height: 1.15; font-weight: 700; color: #222; }
 .pc-region { font-size: 13px; color: #6b6b6b; margin-top: 2px; }
-.pc-date { font-family: 'Caveat', cursive; font-size: clamp(16px, 2.2vw, 22px); color: #3a3a3a; margin-top: 6px; }
-.pc-note { font-family: 'Caveat', cursive; font-size: clamp(17px, 2.4vw, 24px); color: #1d3f6e; margin: 12px 0 0; line-height: 1.35; flex: 1; }
+.pc-date { font-family: 'Noto Serif TC', Georgia, serif; font-size: clamp(16px, 2.2vw, 22px); color: #3a3a3a; margin-top: 6px; }
+.pc-note { font-family: 'Noto Serif TC', Georgia, serif; font-size: clamp(17px, 2.4vw, 24px); color: #1d3f6e; margin: 12px 0 0; line-height: 1.35; flex: 1; }
 .pc-note-empty { color: rgba(29,63,110,0.45); font-style: italic; }
 .pc-lines { margin-top: auto; display: grid; gap: 10px; }
 .pc-lines i { display: block; height: 1px; background: rgba(0,0,0,0.18); }
@@ -299,40 +299,10 @@ details.extras summary .muted { color: var(--text); font-size: 13px; min-width: 
 .gallery .slide .slide-dl { position: absolute; top: 10px; right: 10px; width: 34px; height: 34px; border-radius: 999px; background: rgba(0,0,0,0.35); color: #fff; display: inline-flex; align-items: center; justify-content: center; backdrop-filter: blur(2px); }
 .gallery .slide .slide-dl svg { width: 18px; height: 18px; }
 
-/* ===== 明信片標示樣式 A–E（?mark=a..e） ===== */
+/* ===== 明信片標示：左下角英文地名 + 日期（單一字體 Noto Serif TC） ===== */
 .pc-photo { overflow: hidden; }
-.pc-mark { position: absolute; color: #fff; pointer-events: none; }
-/* A 無郵戳：左下地名 */
 .pc-shade { position: absolute; left: 14px; right: 14px; bottom: 14px; height: 62%; background: linear-gradient(to top, rgba(0,0,0,0.66) 0%, rgba(0,0,0,0.42) 30%, rgba(0,0,0,0.15) 62%, rgba(0,0,0,0) 100%); pointer-events: none; }
-.mark-a .pc-mark { left: 30px; bottom: 28px; right: 30px; text-shadow: 0 1px 4px rgba(0,0,0,0.55); }
-.mark-a .mk-city { font-family: 'Noto Serif TC', Georgia, serif; font-weight: 700; font-size: clamp(20px, 3.4vw, 34px); letter-spacing: 3px; line-height: 1.1; }
-.mark-a .mk-sub { font-family: 'Caveat', cursive; font-size: clamp(14px, 2vw, 20px); letter-spacing: 1px; opacity: 0.95; margin-top: 4px; }
-/* B 圓形郵戳 */
-.mark-b .pc-round { top: 22px; left: 22px; width: clamp(96px, 22%, 150px); height: auto; transform: rotate(-10deg); filter: drop-shadow(0 2px 6px rgba(0,0,0,0.4)); font-family: 'Noto Serif TC', Georgia, serif; }
-/* C 行李吊牌 */
-.mark-c .pc-tag { top: 22px; left: 22px; background: #fbf8f1; color: #222; border-radius: 8px 8px 8px 8px; padding: 10px 14px 10px 30px; box-shadow: 0 6px 16px rgba(0,0,0,0.35); transform: rotate(-3deg); max-width: 70%; border: 1px solid rgba(0,0,0,0.08); }
-.mark-c .pc-tag .hole { position: absolute; left: 11px; top: 50%; width: 10px; height: 10px; margin-top: -5px; border-radius: 50%; background: #2b3540; box-shadow: inset 0 1px 2px rgba(0,0,0,0.6), 0 0 0 2px #e6e0d4; }
-.mark-c .mk-city { font-family: 'Noto Serif TC', Georgia, serif; font-weight: 700; font-size: 15px; letter-spacing: 1.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.mark-c .mk-sub { font-family: 'Caveat', cursive; font-size: 13px; color: #555; white-space: nowrap; }
-/* D 底部資訊條 */
-.mark-d .pc-strip { left: 14px; right: 14px; bottom: 14px; display: flex; align-items: baseline; gap: 8px; padding: 12px 14px; background: linear-gradient(to top, rgba(0,0,0,0.6), rgba(0,0,0,0.25)); backdrop-filter: blur(3px); font-size: 14px; }
-.mark-d .pin { font-size: 13px; }
-.mark-d .mk-city { font-family: 'Noto Serif TC', Georgia, serif; font-weight: 700; letter-spacing: 1.5px; font-size: clamp(14px, 2.4vw, 20px); line-height: 1.15; min-width: 0; }
-.mark-d .pc-strip { flex-wrap: wrap; }
-.mark-d .mk-country { color: rgba(255,255,255,0.8); font-size: 12px; letter-spacing: 1px; white-space: nowrap; }
-.mark-d .mk-date { margin-left: auto; font-family: 'Caveat', cursive; font-size: 16px; white-space: nowrap; }
-/* E 郵票 */
-.mark-e .pc-stampmark { top: 20px; right: 20px; padding: 7px; background: #fff; transform: rotate(3deg); box-shadow: 0 6px 16px rgba(0,0,0,0.35); max-width: 60%;
-  padding: 12px; --hole: 5px;
-  -webkit-mask-image: radial-gradient(circle at var(--hole) var(--hole), transparent calc(var(--hole) - 1.5px), #000 var(--hole)), linear-gradient(#000 0 0);
-  -webkit-mask-position: calc(-1 * var(--hole)) calc(-1 * var(--hole)), 0 0; -webkit-mask-size: calc(2 * var(--hole)) calc(2 * var(--hole)), 100% 100%; -webkit-mask-repeat: repeat, no-repeat; -webkit-mask-clip: border-box, content-box; -webkit-mask-composite: source-over;
-  mask-image: radial-gradient(circle at var(--hole) var(--hole), transparent calc(var(--hole) - 1.5px), #000 var(--hole)), linear-gradient(#000 0 0);
-  mask-position: calc(-1 * var(--hole)) calc(-1 * var(--hole)), 0 0; mask-size: calc(2 * var(--hole)) calc(2 * var(--hole)), 100% 100%; mask-repeat: repeat, no-repeat; mask-clip: border-box, content-box; mask-composite: add; }
-.mark-e .pc-stampmark .inner { border: 1.5px solid #0f766e; padding: 8px 12px; color: #0f766e; text-align: center; }
-.mark-e .mk-city { font-family: 'Noto Serif TC', Georgia, serif; font-weight: 700; font-size: 14px; letter-spacing: 1.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.mark-e .mk-sub { font-family: 'Caveat', cursive; font-size: 12px; margin-top: 2px; white-space: nowrap; }
-@media (max-width: 640px) {
-  .mark-a .pc-mark { left: 22px; bottom: 22px; }
-  .mark-c .pc-tag { top: 16px; left: 16px; padding: 8px 12px 8px 28px; }
-  .mark-e .pc-stampmark { top: 14px; right: 14px; }
-}
+.pc-mark { position: absolute; left: 30px; right: 30px; bottom: 28px; color: #fff; pointer-events: none; text-shadow: 0 1px 4px rgba(0,0,0,0.55); font-family: 'Noto Serif TC', Georgia, 'Times New Roman', serif; }
+.pc-mark .mk-city { font-weight: 700; font-size: clamp(20px, 3.4vw, 34px); letter-spacing: 3px; line-height: 1.1; }
+.pc-mark .mk-sub { font-weight: 500; font-size: clamp(13px, 1.8vw, 17px); letter-spacing: 2px; opacity: 0.92; margin-top: 6px; }
+@media (max-width: 640px) { .pc-mark { left: 22px; bottom: 22px; } }
