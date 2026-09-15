@@ -282,3 +282,11 @@ details.extras summary .muted { color: var(--text); font-size: 13px; min-width: 
   .pc-place { font-size: 24px; margin-top: 8px; }
   .pc-lines { display: none; }
 }
+
+/* 明信片右側：地圖 */
+.pc-mapside { position: relative; padding: 14px 14px 14px 0; }
+.pc-map { width: 100%; height: 100%; border: 6px solid #fff; box-shadow: 0 2px 6px rgba(0,0,0,0.18); background: #e5e7eb; border-radius: 2px; }
+.pc-map .leaflet-control-container { display: none; }
+@media (max-width: 640px) {
+  .pc-mapside { padding: 10px 12px 12px; }
+}
