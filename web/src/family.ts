@@ -27,7 +27,6 @@ export function renderFamilyPage(root: HTMLElement, token: string, tlOpts: Timel
       <header class="clocks" id="clocks"></header>
       <section class="status" id="status"><p class="muted">載入中…</p></section>
       <section class="gallery pc-embed" id="gallery" hidden></section>
-      <details class="flights" id="flights" hidden><summary><span class="ttl">航段</span><span class="muted" id="flights-sum"></span></summary><div id="flights-body"></div></details>
       <section class="map-wrap"><div id="map" class="map"></div><button class="map-all" id="map-all" type="button" hidden>顯示全部打卡點</button></section>
       <section class="timeline"><h2>時間軸</h2><ul id="timeline"></ul><div id="tl-more" class="tl-more"></div></section>
       <footer class="foot"><small>此頁僅供持有連結者查看。位置由旅行者主動回報，非即時追蹤。</small></footer>
@@ -35,9 +34,28 @@ export function renderFamilyPage(root: HTMLElement, token: string, tlOpts: Timel
 
   const clocksEl = root.querySelector<HTMLElement>('#clocks')!;
   const statusEl = root.querySelector<HTMLElement>('#status')!;
-  const flightsEl = root.querySelector<HTMLElement>('#flights')!;
+  // 狀態卡：主要內容每秒重繪，航段鈕與航段面板固定不重建（避免點擊時被換掉）
+  const PLANE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z"/></svg>';
+  const mountStatus = (): void => {
+    statusEl.innerHTML = `
+      <div id="status-main"></div>
+      <button class="flights-toggle" id="flights-toggle" type="button" hidden aria-expanded="false" aria-controls="flights-panel" title="航段資訊">${PLANE}<span id="flights-count"></span></button>
+      <div class="flights-panel" id="flights-panel" hidden><div class="fsum" id="flights-sum"></div><div id="flights-body"></div></div>`;
+  };
+  mountStatus();
+  const statusMain = (): HTMLElement => root.querySelector<HTMLElement>('#status-main')!;
+  const flightsToggle = root.querySelector<HTMLButtonElement>('#flights-toggle')!;
+  const flightsCount = root.querySelector<HTMLElement>('#flights-count')!;
+  const flightsPanel = root.querySelector<HTMLElement>('#flights-panel')!;
   const flightsBody = root.querySelector<HTMLElement>('#flights-body')!;
   const flightsSum = root.querySelector<HTMLElement>('#flights-sum')!;
+  let flightsOpen = false;
+  flightsToggle.addEventListener('click', () => {
+    flightsOpen = !flightsOpen;
+    flightsPanel.hidden = !flightsOpen;
+    flightsToggle.setAttribute('aria-expanded', String(flightsOpen));
+    flightsToggle.classList.toggle('on', flightsOpen);
+  });
   const galleryEl = root.querySelector<HTMLElement>('#gallery')!;
   const timelineEl = root.querySelector<HTMLElement>('#timeline')!;
   applyPwaIdentity('family');
@@ -181,7 +199,8 @@ export function renderFamilyPage(root: HTMLElement, token: string, tlOpts: Timel
       : '';
 
     statusEl.className = `status ${cls}`;
-    statusEl.innerHTML = `
+    if (!root.querySelector('#status-main')) mountStatus(); // 失效 / 錯誤訊息曾把卡片整個換掉
+    statusMain().innerHTML = `
       <div class="trip-title">${esc(view.title)} <span class="muted">每 ${view.intervalHours} 小時回報</span></div>
       <div class="head">${esc(head)}</div>
       ${lastLine}
@@ -192,11 +211,14 @@ export function renderFamilyPage(root: HTMLElement, token: string, tlOpts: Timel
     if (!view) return;
     const wins = toWindows(view.flights);
     if (!wins.length) {
-      flightsEl.hidden = true;
+      flightsToggle.hidden = true;
+      flightsPanel.hidden = true;
       return;
     }
     const now = new Date();
-    flightsEl.hidden = false;
+    flightsToggle.hidden = false;
+    flightsPanel.hidden = !flightsOpen;
+    flightsCount.textContent = `${wins.length} 段`;
     const nowF = currentFlight(wins, now);
     const upcoming = wins.filter((f) => f.departAt > now).sort((a, b) => a.departAt.getTime() - b.departAt.getTime())[0];
     flightsSum.textContent = nowF

@@ -198,13 +198,19 @@ label.inline.small { font-size: 13px; color: var(--muted); margin: 6px 0 2px; }
 .family .timeline h2 { font-size: 15px; color: var(--muted); font-weight: 600; margin: 14px 0 8px; }
 
 /* 航段：可折疊，預設收合 */
-details.flights summary { list-style: none; cursor: pointer; display: flex; align-items: baseline; gap: 10px; }
-details.flights summary::-webkit-details-marker { display: none; }
-details.flights summary .ttl { font-size: 17px; font-weight: 700; }
-details.flights summary .muted { flex: 1; font-size: 13px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-details.flights summary::after { content: '▾'; color: var(--muted); }
-details.flights[open] summary::after { content: '▴'; }
-details.flights[open] summary { margin-bottom: 8px; }
+/* 家人頁：航段資訊併入狀態卡，右上角按鈕 toggle */
+.status { position: relative; }
+.status .trip-title { padding-right: 76px; }
+.flights-toggle { position: absolute; top: 10px; right: 10px; display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 10px 0 8px; border-radius: 999px; border: 1px solid rgba(0,0,0,0.12); background: rgba(255,255,255,0.7); color: var(--text); font-size: 12px; font-weight: 600; cursor: pointer; }
+.flights-toggle svg { width: 16px; height: 16px; }
+.flights-toggle[hidden] { display: none; }
+.flights-toggle.on { background: #1d4ed8; border-color: #1d4ed8; color: #fff; }
+.flights-panel { margin-top: 10px; padding-top: 8px; border-top: 1px dashed rgba(0,0,0,0.15); }
+.flights-panel[hidden] { display: none; }
+.flights-panel .fsum { font-size: 13px; color: var(--muted); margin-bottom: 2px; }
+.flights-panel ul { list-style: none; margin: 0; padding: 0; }
+.flights-panel .flight { border-bottom-color: rgba(0,0,0,0.12); }
+.flights-panel .muted.small { margin: 6px 0 0; }
 
 /* 打卡頁：備註 / 下次回報 折疊 */
 details.extras { margin-top: 10px; }
