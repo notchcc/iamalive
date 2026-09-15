@@ -1,11 +1,13 @@
 /**
  * 照片回顧頁 /p/{photoToken}：這趟旅程所有有照片的打卡。
  * - 網格檢視（預設）：像手機圖庫，依裝置寬度自動決定每列張數，按打卡當地日期分組，捲到底再載入更多
- * - 地圖檢視：像 iPhone 圖庫的地圖，照片縮圖聚合成群，點群放大、放到底或單張就開全螢幕
+ * - 地圖檢視：上方是家人頁同款的照片幻燈片（隨機輪播、箭頭、點開全螢幕），下方像 iPhone 圖庫的地圖：
+ *   縮圖聚合成群，點群放大、放到底或單張就開全螢幕；幻燈片換張時地圖飛到該張的拍攝地
  * - 兩種模式點照片都進全螢幕檢視（X / 下載 / 左右滑動）
  */
 import L from 'leaflet';
 import { createLightbox, type ViewerItem } from './lightbox';
+import { createPostcardDeck, type PostcardDeck, type PostcardPhoto } from './postcard';
 import { tileLayer } from './mapview';
 import { applyPwaIdentity } from './pwa';
 import { renderShareBar } from './share';
@@ -62,7 +64,10 @@ export function renderPhotosPage(root: HTMLElement, token: string): () => void {
       </header>
       <section id="ph-grid" class="ph-grid-wrap"><p class="muted ph-empty">載入中…</p></section>
       <div id="ph-more" class="tl-more" hidden></div>
-      <section id="ph-map-wrap" class="ph-map-wrap" hidden><div id="ph-map" class="ph-map"></div></section>
+      <section id="ph-map-wrap" class="ph-map-wrap" hidden>
+        <div class="gallery pc-embed ph-deck" id="ph-deck"></div>
+        <div class="ph-map-box"><div id="ph-map" class="ph-map"></div><button class="map-all" id="ph-map-all" type="button" hidden>顯示全部照片</button></div>
+      </section>
       <footer class="foot"><small>此頁僅供持有連結者查看。照片為旅行者打卡時上傳。</small></footer>
     </div>`;
   renderShareBar(root.querySelector<HTMLElement>('#share')!, `${location.origin}/p/${token}`, '把這條連結傳給想看照片的人；在 LINE 內按「開啟」會用瀏覽器開啟。', { collapsed: true });
@@ -161,6 +166,44 @@ export function renderPhotosPage(root: HTMLElement, token: string): () => void {
   );
   io.observe(moreEl);
 
+  // ---- 地圖模式的幻燈片（家人頁同款）：換張時地圖飛到拍攝地並標紅點 ----
+  const deckEl = root.querySelector<HTMLElement>('#ph-deck')!;
+  const mapAllBtn = root.querySelector<HTMLButtonElement>('#ph-map-all')!;
+  let deck: PostcardDeck | null = null;
+  let mapUserUntil = 0; // 使用者剛拖過地圖，20 秒內自動輪播不搶視角
+  const noteMapUse = (): void => {
+    mapUserUntil = Date.now() + 20_000;
+  };
+  const focusMarker = L.circleMarker([0, 0], { radius: 10, color: '#fff', weight: 3, fillColor: '#b8412f', fillOpacity: 1 });
+  const focusHalo = L.circle([0, 0], { radius: 1500, color: '#b8412f', weight: 1, fillOpacity: 0.08 });
+  const toPostcard = (p: PhotoJson): PostcardPhoto => ({ photoId: p.photoId, lat: p.lat, lng: p.lng, tz: p.tz, place: p.place, placeEn: p.placeEn ?? null, note: p.note, takenAt: p.takenAt, at: p.at });
+  const focusPhoto = (p: PostcardPhoto, manual: boolean): void => {
+    if (!map) return;
+    if (!manual && Date.now() < mapUserUntil) return;
+    const ll: L.LatLngExpression = [p.lat, p.lng];
+    focusMarker.setLatLng(ll).addTo(map);
+    focusHalo.setLatLng(ll).addTo(map);
+    map.flyTo(ll, Math.max(map.getZoom(), 11), { duration: 1.2 });
+    mapAllBtn.hidden = false;
+  };
+  const showAllPhotos = (): void => {
+    focusMarker.remove();
+    focusHalo.remove();
+    mapAllBtn.hidden = true;
+    fitAll(true);
+    noteMapUse();
+  };
+  mapAllBtn.addEventListener('click', showAllPhotos);
+  const ensureDeck = (): void => {
+    if (!photos.length) {
+      deckEl.hidden = true;
+      return;
+    }
+    deckEl.hidden = false;
+    if (!deck) deck = createPostcardDeck(deckEl, { photoUrl: (id) => photoUrl(id), onChange: focusPhoto });
+    deck.addPhotos(photos.map(toPostcard));
+  };
+
   // ---- 地圖：縮圖聚合 ----
   let map: L.Map | null = null;
   let markers: L.LayerGroup | null = null;
@@ -172,6 +215,9 @@ export function renderPhotosPage(root: HTMLElement, token: string): () => void {
     map.setView([25.04, 121.56], 3);
     markers = L.layerGroup().addTo(map);
     map.on('moveend zoomend', renderClusters);
+    const mapEl = root.querySelector<HTMLElement>('#ph-map')!;
+    mapEl.addEventListener('pointerdown', noteMapUse, { passive: true });
+    mapEl.addEventListener('wheel', noteMapUse, { passive: true });
     return map;
   };
   const renderClusters = (): void => {
@@ -209,10 +255,11 @@ export function renderPhotosPage(root: HTMLElement, token: string): () => void {
       m.addTo(markers);
     }
   };
-  const fitAll = (): void => {
+  const fitAll = (animate = false): void => {
     if (!map || !photos.length) return;
     const b = L.latLngBounds(photos.map((p) => [p.lat, p.lng] as L.LatLngTuple));
     if (photos.length === 1) map.setView(b.getCenter(), 13);
+    else if (animate) map.flyToBounds(b.pad(0.15), { maxZoom: 14, duration: 1 });
     else map.fitBounds(b.pad(0.15), { maxZoom: 14 });
     mapFitted = true;
   };
@@ -236,6 +283,8 @@ export function renderPhotosPage(root: HTMLElement, token: string): () => void {
       renderGrid();
       if (!mapFitted) fitAll();
       renderClusters();
+      ensureDeck();
+      window.setTimeout(() => mp.invalidateSize(), 80);
     }
     location.hash = m === 'map' ? '#map' : '';
   };
@@ -269,6 +318,7 @@ export function renderPhotosPage(root: HTMLElement, token: string): () => void {
   return () => {
     io.disconnect();
     lightbox.destroy();
+    deck?.destroy();
     map?.remove();
   };
 }
