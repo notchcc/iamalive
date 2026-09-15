@@ -92,10 +92,16 @@ export function renderPostcardsPage(root: HTMLElement, token: string): () => voi
           <button class="lb-btn" id="lb-close" type="button" aria-label="關閉">✕</button>
         </div>
       </div>
-      <div class="pc-deck" id="pc-deck"><p class="pc-empty">載入中…</p></div>
+      <div class="pc-deck" id="pc-deck">
+        <p class="pc-empty">載入中…</p>
+        <button class="pc-nav pc-nav-prev" id="pc-prev" type="button" aria-label="上一張"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 5-7 7 7 7"/></svg></button>
+        <button class="pc-nav pc-nav-next" id="pc-next" type="button" aria-label="下一張"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></button>
+      </div>
       <div class="pc-mapwrap"><div id="pc-map" class="pc-mapbig"></div></div>
     </div>`;
   const deck = root.querySelector<HTMLElement>('#pc-deck')!;
+  const prevBtn = root.querySelector<HTMLButtonElement>('#pc-prev')!;
+  const nextBtn = root.querySelector<HTMLButtonElement>('#pc-next')!;
   const titleEl = root.querySelector<HTMLElement>('#pc-title')!;
   const pauseBtn = root.querySelector<HTMLButtonElement>('#pc-pause')!;
   const lightbox = root.querySelector<HTMLElement>('#pc-lightbox')!;
@@ -190,6 +196,8 @@ export function renderPostcardsPage(root: HTMLElement, token: string): () => voi
       window.setTimeout(() => prev.remove(), 700);
     }
     deck.querySelector('.pc-empty')?.remove();
+    prevBtn.disabled = pos <= 0;
+    deck.classList.add('has-cards');
     preload(order[pos + 1]);
   };
 
@@ -215,6 +223,14 @@ export function renderPostcardsPage(root: HTMLElement, token: string): () => voi
     paused = !paused;
     pauseBtn.textContent = paused ? '▶' : '❚❚';
     pauseBtn.setAttribute('aria-label', paused ? '播放' : '暫停');
+  });
+  prevBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    back();
+  });
+  nextBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    next();
   });
   deck.addEventListener('click', (e) => {
     const t = e.target as HTMLElement;
