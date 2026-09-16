@@ -150,7 +150,7 @@ export function renderTimeline(el: HTMLElement, items: RecentItem[], now = new D
         ? `<a class="tl-photo" href="${photoUrl(it.photoId)}" target="_blank" rel="noopener"><img src="${photoUrl(it.photoId)}" alt="" loading="lazy" /></a>`
         : '';
       const taken = takenLine(it);
-      return `<li class="tl-item src-${it.src}${photo ? ' has-photo' : ''}">
+      return `<li class="tl-item src-${it.src}${photo ? ' has-photo' : ''}"${it.id ? ` data-id="${esc(it.id)}"` : ''}>
         ${photo}
         <div class="tl-time"><b>${esc(fmtDateTime(at, TAIPEI))}</b> ${local}<span class="ago">${esc(fmtAgo(at, now))}</span></div>
         ${taken ? `<div class="tl-taken">${taken}</div>` : ''}

@@ -292,15 +292,18 @@ export function renderFamilyPage(root: HTMLElement, token: string, tlOpts: Timel
   };
   mapEl.addEventListener('pointerdown', noteMapUse, { passive: true });
   mapEl.addEventListener('wheel', noteMapUse, { passive: true });
-  const focusPhoto = (p: PostcardPhoto, manual: boolean): void => {
-    if (!manual && Date.now() < mapUserUntil) return;
-    const ll: L.LatLngExpression = [p.lat, p.lng];
+  const focusAt = (lat: number, lng: number, place: string | null | undefined): void => {
+    const ll: L.LatLngExpression = [lat, lng];
     focusMarker.setLatLng(ll).addTo(map);
     focusHalo.setLatLng(ll).addTo(map);
     focusMarker.unbindTooltip();
-    if (p.place) focusMarker.bindTooltip(p.place, { direction: 'top' });
+    if (place) focusMarker.bindTooltip(place, { direction: 'top' });
     map.flyTo(ll, Math.max(map.getZoom(), 10), { duration: 1.2 });
     mapAllBtn.hidden = false;
+  };
+  const focusPhoto = (p: PostcardPhoto, manual: boolean): void => {
+    if (!manual && Date.now() < mapUserUntil) return;
+    focusAt(p.lat, p.lng, p.place);
   };
   const showAllPoints = (): void => {
     focusMarker.remove();
@@ -367,6 +370,28 @@ export function renderFamilyPage(root: HTMLElement, token: string, tlOpts: Timel
       deck.addPhotos(items, { front: true }); // 新照片進來就排在下一張
     }
   };
+
+  // ---- 點時間軸卡片：有照片就讓幻燈片顯示那張（地圖跟著飛），沒有照片就只在地圖標出該筆位置 ----
+  timelineEl.addEventListener('click', (e) => {
+    const t = e.target as HTMLElement;
+    if (t.closest('a, button')) return; // 縮圖連結、座標連結、刪除鈕維持原本行為
+    const li = t.closest<HTMLElement>('li.tl-item');
+    if (!li?.dataset.id) return;
+    const it = fullList().find((x) => x.id === li.dataset.id);
+    if (!it) return;
+    timelineEl.querySelectorAll('.tl-item.active').forEach((x) => x.classList.remove('active'));
+    li.classList.add('active');
+    noteMapUse();
+    if (it.photoId && deck) {
+      const p = toPhoto(it);
+      if (p) deck.addPhotos([p]); // 比幻燈片已載入的更舊也能顯示
+      deck.jumpTo([it.photoId]); // onChange(manual) 會讓地圖飛過去
+      galleryEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } else {
+      focusAt(it.lat, it.lng, it.place ?? null);
+      mapEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  });
 
   const renderAll = (): void => {
     if (!view) return;
