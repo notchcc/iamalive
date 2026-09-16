@@ -62,7 +62,7 @@ export class TrackLayer {
     else this.map.flyToBounds(L.latLngBounds(pts).pad(0.2), { maxZoom: 15, duration: 1 });
   }
 
-  render(items: RecentItem[], opts: { fit?: boolean; photoUrl?: PhotoUrlFn } = {}): void {
+  render(items: RecentItem[], opts: { fit?: boolean; photoUrl?: PhotoUrlFn; onSelect?: (it: RecentItem) => void } = {}): void {
     this.group.clearLayers();
     this.pts = [];
     if (!items.length) return;
@@ -85,6 +85,7 @@ export class TrackLayer {
         dashArray: it.src === 'manual' ? '3 3' : undefined,
       });
       marker.bindPopup(popupHtml(it, opts.photoUrl), { maxWidth: 260 });
+      if (opts.onSelect) marker.on('click', () => opts.onSelect!(it));
       marker.addTo(this.group);
     });
     if (pts.length > 1) {

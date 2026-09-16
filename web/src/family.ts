@@ -137,7 +137,7 @@ export function renderFamilyPage(root: HTMLElement, token: string, tlOpts: Timel
     const key = all.map((s) => s.id ?? s.at.toMillis()).join(',');
     if (key !== trackKey) {
       trackKey = key;
-      track.render(all, { fit: firstFit, photoUrl });
+      track.render(all, { fit: firstFit, photoUrl, onSelect: (it) => selectItem(it) });
       firstFit = false;
     }
     const hasMore = shownCount < all.length || !exhausted;
@@ -409,15 +409,10 @@ export function renderFamilyPage(root: HTMLElement, token: string, tlOpts: Timel
   };
 
   // ---- 點時間軸卡片：有照片就讓幻燈片顯示那張（地圖跟著飛），沒有照片就只在地圖標出該筆位置 ----
-  timelineEl.addEventListener('click', (e) => {
-    const t = e.target as HTMLElement;
-    if (t.closest('a, button')) return; // 縮圖連結、座標連結、刪除鈕維持原本行為
-    const li = t.closest<HTMLElement>('li.tl-item');
-    if (!li?.dataset.id) return;
-    const it = fullList().find((x) => x.id === li.dataset.id);
-    if (!it) return;
+  /** 選中一筆打卡（點時間軸卡片或地圖上的點都走這裡）：窺視條顯示它、幻燈片 / 地圖跳過去 */
+  const selectItem = (it: RecentItem): void => {
     timelineEl.querySelectorAll('.tl-item.active').forEach((x) => x.classList.remove('active'));
-    li.classList.add('active');
+    if (it.id) timelineEl.querySelector(`li.tl-item[data-id="${it.id}"]`)?.classList.add('active');
     selectedId = it.id ?? null;
     renderPeek();
     noteMapUse();
@@ -431,6 +426,14 @@ export function renderFamilyPage(root: HTMLElement, token: string, tlOpts: Timel
       focusAt(it.lat, it.lng, it.place ?? null);
       mapEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
+  };
+  timelineEl.addEventListener('click', (e) => {
+    const t = e.target as HTMLElement;
+    if (t.closest('a, button')) return; // 縮圖連結、座標連結、刪除鈕維持原本行為
+    const li = t.closest<HTMLElement>('li.tl-item');
+    if (!li?.dataset.id) return;
+    const it = fullList().find((x) => x.id === li.dataset.id);
+    if (it) selectItem(it);
   });
 
   // ---- 底部抽屜：peek（預設，只露最新 / 被選那筆）↔ half ↔ full；拖曳條可拖，返回鍵 / Esc / 點背景回到 peek ----
