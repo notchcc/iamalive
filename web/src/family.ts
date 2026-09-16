@@ -23,11 +23,11 @@ function cityTz(city: string, _tz: string): string {
 export function renderFamilyPage(root: HTMLElement, token: string, tlOpts: TimelineOpts = {}): () => void {
   root.innerHTML = `
     <div class="page family">
-      <div id="share"></div>
       <header class="clocks" id="clocks"></header>
       <section class="status" id="status"><p class="muted">載入中…</p></section>
       <section class="gallery pc-embed" id="gallery" hidden></section>
       <section class="map-wrap"><div id="map" class="map"></div><button class="map-all" id="map-all" type="button" hidden>顯示全部打卡點</button></section>
+      <div id="share"></div>
       <footer class="foot"><small>此頁僅供持有連結者查看。位置由旅行者主動回報，非即時追蹤。</small></footer>
     </div>
     <div class="sheet-backdrop" id="sheet-backdrop" hidden></div>
