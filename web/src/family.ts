@@ -28,9 +28,17 @@ export function renderFamilyPage(root: HTMLElement, token: string, tlOpts: Timel
       <section class="status" id="status"><p class="muted">載入中…</p></section>
       <section class="gallery pc-embed" id="gallery" hidden></section>
       <section class="map-wrap"><div id="map" class="map"></div><button class="map-all" id="map-all" type="button" hidden>顯示全部打卡點</button></section>
-      <section class="timeline"><h2>時間軸</h2><ul id="timeline"></ul><div id="tl-more" class="tl-more"></div></section>
       <footer class="foot"><small>此頁僅供持有連結者查看。位置由旅行者主動回報，非即時追蹤。</small></footer>
-    </div>`;
+    </div>
+    <div class="sheet-backdrop" id="sheet-backdrop" hidden></div>
+    <section class="sheet peek" id="sheet" aria-label="打卡紀錄">
+      <div class="sheet-head" id="sheet-head">
+        <div class="sheet-handle" aria-hidden="true"></div>
+        <button type="button" class="sheet-peek" id="sheet-peek" aria-label="展開打卡紀錄"></button>
+        <div class="sheet-title"><span>打卡紀錄</span><span class="muted" id="sheet-count"></span><button type="button" class="sheet-close" id="sheet-close" aria-label="收合">▾</button></div>
+      </div>
+      <div class="sheet-body" id="sheet-body"><ul id="timeline"></ul><div id="tl-more" class="tl-more"></div></div>
+    </section>`;
 
   const clocksEl = root.querySelector<HTMLElement>('#clocks')!;
   const statusEl = root.querySelector<HTMLElement>('#status')!;
@@ -96,21 +104,47 @@ export function renderFamilyPage(root: HTMLElement, token: string, tlOpts: Timel
     return [...view.recent, ...extra.filter((e) => !seen.has(e.id))];
   };
   let trackKey = '';
+  let selectedId: string | null = null; // 被點的那筆（窺視條顯示它；沒有就顯示最新）
+  const sheetCount = root.querySelector<HTMLElement>('#sheet-count')!;
+  const peekEl = root.querySelector<HTMLButtonElement>('#sheet-peek')!;
+  const sheetEl = root.querySelector<HTMLElement>('#sheet')!;
+  const sheetHead = root.querySelector<HTMLElement>('#sheet-head')!;
+  const renderPeek = (): void => {
+    const all = fullList();
+    const it = (selectedId && all.find((x) => x.id === selectedId)) || all[0];
+    if (!it) {
+      peekEl.innerHTML = '<span class="pk-main muted">尚無回報</span>';
+      return;
+    }
+    const at = it.at.toDate();
+    peekEl.innerHTML = `
+      ${it.photoId ? `<img class="pk-thumb" src="${photoUrl(it.photoId)}?s=t" alt="" />` : '<span class="pk-dot" aria-hidden="true"></span>'}
+      <span class="pk-text">
+        <span class="pk-main"><b>${esc(fmtDateTime(at, TAIPEI))}</b> · ${esc(placeText(it))}</span>
+        <span class="pk-sub">${it === all[0] ? '最新' : '已選'} · ${esc(fmtAgo(at, new Date()))}${it.note ? ` · 「${esc(it.note)}」` : ''}</span>
+      </span>
+      <span class="pk-chev" aria-hidden="true">▴</span>`;
+    // 窺視高度依實際內容（有無縮圖）算，讓 peek 狀態剛好只露出頂部
+    requestAnimationFrame(() => sheetEl.style.setProperty('--peek-h', `${sheetHead.offsetHeight}px`));
+  };
   const renderTl = (): void => {
     if (!view) return;
     const all = fullList();
     const shown = all.slice(0, shownCount);
     renderTimeline(timelineEl, shown, new Date(), photoUrl, tlOpts);
-    // 地圖只畫時間軸已載入的點；資料沒變就不重畫（每分鐘的「多久前」更新不動地圖）
-    const key = shown.map((s) => s.id ?? s.at.toMillis()).join(',');
+    if (selectedId) timelineEl.querySelector(`li.tl-item[data-id="${selectedId}"]`)?.classList.add('active');
+    // 地圖畫全部已同步的點（recent 最多 100 筆 + 抽屜續抓的）；資料沒變就不重畫（每分鐘的「多久前」更新不動地圖）
+    const key = all.map((s) => s.id ?? s.at.toMillis()).join(',');
     if (key !== trackKey) {
       trackKey = key;
-      track.render(shown, { fit: firstFit, photoUrl });
+      track.render(all, { fit: firstFit, photoUrl });
       firstFit = false;
     }
     const hasMore = shownCount < all.length || !exhausted;
     moreEl.textContent = loadingMore ? '載入中…' : hasMore ? '' : all.length > PAGE ? '已顯示全部' : '';
     moreEl.hidden = !hasMore && all.length <= PAGE;
+    sheetCount.textContent = all.length ? `${all.length}${exhausted ? '' : '+'} 筆` : '';
+    renderPeek();
   };
   const toRecent = (j: { id: string; lat: number; lng: number; acc: number | null; src: RecentItem['src']; tz: string; place: string | null; placeEn?: string | null; note: string; photoId: string | null; takenAt: string | null; at: string }): RecentItem => ({
     id: j.id,
@@ -151,9 +185,12 @@ export function renderFamilyPage(root: HTMLElement, token: string, tlOpts: Timel
       renderTl();
     }
   };
-  const io = new IntersectionObserver((entries) => {
-    if (entries.some((e) => e.isIntersecting)) void loadMore();
-  });
+  const io = new IntersectionObserver(
+    (entries) => {
+      if (entries.some((e) => e.isIntersecting)) void loadMore();
+    },
+    { root: root.querySelector<HTMLElement>('#sheet-body'), rootMargin: '200px 0px' },
+  );
   io.observe(moreEl);
   const photoUrl = (id: string): string => `/api/p/${encodeURIComponent(token)}/${encodeURIComponent(id)}`;
 
@@ -381,7 +418,10 @@ export function renderFamilyPage(root: HTMLElement, token: string, tlOpts: Timel
     if (!it) return;
     timelineEl.querySelectorAll('.tl-item.active').forEach((x) => x.classList.remove('active'));
     li.classList.add('active');
+    selectedId = it.id ?? null;
+    renderPeek();
     noteMapUse();
+    setSheet('peek'); // 縮成窺視條，露出幻燈片與地圖
     if (it.photoId && deck) {
       const p = toPhoto(it);
       if (p) deck.addPhotos([p]); // 比幻燈片已載入的更舊也能顯示
@@ -389,9 +429,103 @@ export function renderFamilyPage(root: HTMLElement, token: string, tlOpts: Timel
       galleryEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
     } else {
       focusAt(it.lat, it.lng, it.place ?? null);
-      mapEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      mapEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
   });
+
+  // ---- 底部抽屜：peek（預設，只露最新 / 被選那筆）↔ half ↔ full；拖曳條可拖，返回鍵 / Esc / 點背景回到 peek ----
+  type SheetState = 'peek' | 'half' | 'full';
+  const sheetBody = root.querySelector<HTMLElement>('#sheet-body')!;
+  const backdrop = root.querySelector<HTMLElement>('#sheet-backdrop')!;
+  let sheetState: SheetState = 'peek';
+  let pushed = false; // 是否已為展開狀態推了一筆歷史（讓返回鍵先收抽屜）
+  const setSheet = (st: SheetState, fromPop = false): void => {
+    sheetState = st;
+    sheetEl.classList.remove('peek', 'half', 'full');
+    sheetEl.classList.add(st);
+    sheetEl.style.transform = '';
+    backdrop.hidden = st === 'peek';
+    if (st === 'peek') {
+      sheetBody.scrollTop = 0;
+      if (pushed && !fromPop) {
+        pushed = false;
+        history.back();
+      }
+    } else if (!pushed) {
+      pushed = true;
+      history.pushState({ sheet: true }, '');
+    }
+  };
+  const onPop = (): void => {
+    if (sheetState !== 'peek') {
+      pushed = false;
+      setSheet('peek', true);
+    }
+  };
+  window.addEventListener('popstate', onPop);
+  const onSheetKey = (e: KeyboardEvent): void => {
+    if (e.key === 'Escape' && sheetState !== 'peek') setSheet('peek');
+  };
+  document.addEventListener('keydown', onSheetKey);
+  peekEl.addEventListener('click', () => setSheet('half'));
+  root.querySelector('#sheet-close')!.addEventListener('click', () => setSheet('peek'));
+  backdrop.addEventListener('click', () => setSheet('peek'));
+  // 拖曳：只從頂部（拖曳條 / 窺視條 / 標題列）拖，清單區維持正常捲動
+  let dragY0 = 0;
+  let dragBase = 0;
+  let dragging = false;
+  const offsetFor = (st: SheetState): number => {
+    const h = sheetEl.getBoundingClientRect().height;
+    const peekH = sheetHead.getBoundingClientRect().height;
+    return st === 'full' ? 0 : st === 'half' ? window.innerHeight * 0.42 : Math.max(0, h - peekH);
+  };
+  sheetHead.addEventListener(
+    'touchstart',
+    (e) => {
+      dragY0 = e.touches[0].clientY;
+      dragBase = offsetFor(sheetState);
+      dragging = true;
+      sheetEl.classList.add('dragging');
+    },
+    { passive: true },
+  );
+  sheetHead.addEventListener(
+    'touchmove',
+    (e) => {
+      if (!dragging) return;
+      const dy = e.touches[0].clientY - dragY0;
+      const y = Math.min(offsetFor('peek'), Math.max(0, dragBase + dy));
+      sheetEl.style.transform = `translateY(${y}px)`;
+    },
+    { passive: true },
+  );
+  sheetHead.addEventListener(
+    'touchend',
+    (e) => {
+      if (!dragging) return;
+      dragging = false;
+      sheetEl.classList.remove('dragging');
+      const dy = e.changedTouches[0].clientY - dragY0;
+      const y = Math.min(offsetFor('peek'), Math.max(0, dragBase + dy));
+      // 依放開位置選最近的一檔；小幅拖動（< 24px）視為點擊，交給 click 處理
+      if (Math.abs(dy) < 24) {
+        sheetEl.style.transform = '';
+        return;
+      }
+      const cands: SheetState[] = ['full', 'half', 'peek'];
+      let best: SheetState = sheetState;
+      let bestD = Infinity;
+      for (const c of cands) {
+        const d = Math.abs(offsetFor(c) - y);
+        if (d < bestD) {
+          bestD = d;
+          best = c;
+        }
+      }
+      setSheet(best);
+    },
+    { passive: true },
+  );
 
   const renderAll = (): void => {
     if (!view) return;
@@ -433,6 +567,9 @@ export function renderFamilyPage(root: HTMLElement, token: string, tlOpts: Timel
 
   return () => {
     io.disconnect();
+    window.removeEventListener('popstate', onPop);
+    document.removeEventListener('keydown', onSheetKey);
+    if (pushed) history.back();
     deck?.destroy();
     window.clearInterval(clockTimer);
     window.clearInterval(agoTimer);
